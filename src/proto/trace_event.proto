@@ -1,0 +1,306 @@
+syntax = "proto3";
+
+package lime;
+
+// Matches ClockId enum
+enum ClockId {
+    CLOCK_REALTIME = 0;
+    CLOCK_MONOTONIC = 1;
+    CLOCK_PROCESS_CPUTIME_ID = 2;
+    CLOCK_THREAD_CPUTIME_ID = 3;
+    CLOCK_MONOTONIC_RAW = 4;
+    CLOCK_REALTIME_COARSE = 5;
+    CLOCK_MONOTONIC_COARSE = 6;
+    CLOCK_BOOTTIME = 7;
+    CLOCK_REALTIME_ALARM = 8;
+    CLOCK_BOOTTIME_ALARM = 9;
+    CLOCK_SGI_CYCLE = 10;
+    CLOCK_TAI = 11;
+}
+
+// Matches SchedulingPolicy enum
+message SchedulingPolicy {
+    oneof policy {
+        FifoPolicy fifo = 1;
+        RoundRobinPolicy round_robin = 2;
+        DeadlinePolicy deadline = 3;
+        OtherPolicy other = 4;
+        UnknownPolicy unknown = 5;
+    }
+}
+
+message FifoPolicy {
+    uint32 prio = 1;
+}
+
+message RoundRobinPolicy {
+    uint32 prio = 1;
+}
+
+message DeadlinePolicy {
+    uint64 runtime = 1;
+    uint64 period = 2;
+    uint64 deadline = 3;
+}
+
+message OtherPolicy {}
+message UnknownPolicy {}
+
+// Matches EventData enum
+message EventData {
+    oneof event {
+        SchedWakeUp sched_wake_up = 1;
+        SchedWakeUpNew sched_wake_up_new = 2;
+        SchedWaking sched_waking = 3;
+        SchedSwitchedIn sched_switched_in = 4;
+        SchedSwitchedOut sched_switched_out = 5;
+        SchedMigrateTask sched_migrate_task = 6;
+        ExitArrivalSite exit_arrival_site = 7;
+        EnterClockNanoSleep enter_clock_nano_sleep = 8;
+        EnterSelect enter_select = 9;
+        EnterPselect6 enter_pselect6 = 10;
+        EnterPoll enter_poll = 11;
+        EnterEpollPWait enter_epoll_pwait = 12;
+        SchedSetScheduler sched_set_scheduler = 13;
+        EnterReadSock enter_read_sock = 14;
+        EnterReadFifo enter_read_fifo = 15;
+        EnterReadBlk enter_read_blk = 16;
+        EnterReadChr enter_read_chr = 17;
+        EnterAccept enter_accept = 18;
+        EnterFutex enter_futex = 19;
+        EnterSigTimedWait enter_sig_timed_wait = 20;
+        EnterRtSigreturn enter_rt_sigreturn = 21;
+        EnterNanosleep enter_nanosleep = 22;
+        EnterPause enter_pause = 23;
+        EnterRtSigsuspend enter_rt_sigsuspend = 24;
+        EnterMqTimedreceive enter_mq_timedreceive = 25;
+        RtSigDelivered rt_sig_delivered = 26;
+        EnterRecv enter_recv = 27;
+        EnterRecvfrom enter_recvfrom = 28;
+        EnterRecvmsg enter_recvmsg = 29;
+        EnterRecvmmsg enter_recvmmsg = 30;
+        EnterMsgrcv enter_msgrcv = 31;
+        EnterSchedYield enter_sched_yield = 32;
+        EnterDlTimer enter_dl_timer = 33;
+        EnterSetScheduler enter_set_scheduler = 34;
+        EnterSemop enter_semop = 35;
+        RawSchedulerChange raw_scheduler_change = 36;
+        SchedulerChange scheduler_change = 37;
+        SchedulerChangeFailed scheduler_change_failed = 38;
+        SchedulerChanged scheduler_changed = 39;
+        SchedParamsChange sched_params_change = 40;
+        SchedParamsChanged sched_params_changed = 41;
+        SchedProcessExit sched_process_exit = 42;
+        SchedProcessFork sched_process_fork = 43;
+        SchedProcessExec sched_process_exec = 44;
+        EnterSchedSetAffinity enter_sched_set_affinity = 45;
+        AffinityChange affinity_change = 46;
+        AffinityChangeFailed affinity_change_failed = 47;
+        AffinityChanged affinity_changed = 48;
+        LimeThrottle lime_throttle = 49;
+        LimeThrottleRelease lime_throttle_release = 50;
+        LimeStartOfTrace lime_start_of_trace = 51;
+        LimeEndOfTrace lime_end_of_trace = 52;
+    }
+}
+
+// Event-specific messages
+message SchedWakeUp {
+    uint32 cpu = 1;
+}
+
+message SchedWakeUpNew {
+    uint32 cpu = 1;
+}
+
+message SchedWaking {
+    uint32 cpu = 1;
+}
+
+message SchedSwitchedIn {
+    uint32 cpu = 1;
+    uint32 prio = 2;
+    bool preempt = 3;
+}
+
+message SchedSwitchedOut {
+    uint32 cpu = 1;
+    uint32 prio = 2;
+    uint32 state = 3;
+}
+
+message SchedMigrateTask {
+    uint32 dest_cpu = 1;
+}
+
+message ExitArrivalSite {
+    int32 ret = 1;
+}
+
+message EnterClockNanoSleep {
+    ClockId clock_id = 1;
+    bool abs_time = 2;
+    int64 required_ns = 3;
+}
+
+message EnterSelect {
+    uint64 inp = 1;
+    int64 timeout_usec = 2;
+}
+
+message EnterPselect6 {
+    uint64 inp = 1;
+    int64 timeout_nsec = 2;
+}
+
+message EnterPoll {
+    uint64 pfds = 1;
+    int64 timeout_nsec = 2;
+}
+
+message EnterEpollPWait {
+    uint32 epfd = 1;
+}
+
+message SchedSetScheduler {
+    uint32 policy = 1;
+    uint32 prio = 2;
+}
+
+message EnterReadSock {
+    uint32 fd = 1;
+}
+
+message EnterReadFifo {
+    uint32 fd = 1;
+}
+
+message EnterReadBlk {
+    uint32 fd = 1;
+}
+
+message EnterReadChr {
+    uint32 fd = 1;
+}
+
+message EnterAccept {
+    uint32 sock_fd = 1;
+}
+
+message EnterFutex {
+    uint64 uaddr = 1;
+    uint32 op = 2;
+}
+
+message EnterSigTimedWait {}
+
+message EnterRtSigreturn {}
+
+message EnterNanosleep {
+    int64 required_ns = 1;
+}
+
+message EnterPause {}
+
+message EnterRtSigsuspend {}
+
+message EnterMqTimedreceive {
+    int32 mqd = 1;
+}
+
+message RtSigDelivered {
+    int32 signo = 1;
+    int32 si_code = 2;
+}
+
+message EnterRecv {
+    int32 sock_fd = 1;
+}
+
+message EnterRecvfrom {
+    int32 sock_fd = 1;
+}
+
+message EnterRecvmsg {
+    int32 sock_fd = 1;
+}
+
+message EnterRecvmmsg {
+    int32 sock_fd = 1;
+}
+
+message EnterMsgrcv {
+    int32 msqid = 1;
+}
+
+message EnterSchedYield {}
+
+message EnterDlTimer {
+    uint64 expires = 1;
+}
+
+message EnterSetScheduler {
+    int32 old_policy_num = 1;
+    SchedulingPolicy sched_policy = 2;
+}
+
+message EnterSemop {
+    int32 sem_id = 1;
+    uint64 timeout = 2;
+}
+
+message RawSchedulerChange {}
+
+message SchedulerChange {
+    SchedulingPolicy sched_policy = 1;
+}
+
+message SchedulerChangeFailed {}
+
+message SchedulerChanged {
+    SchedulingPolicy sched_policy = 1;
+}
+
+message SchedParamsChange {
+    SchedulingPolicy sched_policy = 1;
+}
+
+message SchedParamsChanged {
+    SchedulingPolicy sched_policy = 1;
+}
+
+message SchedProcessExit {}
+
+message SchedProcessFork {
+    SchedulingPolicy sched_policy = 1;
+}
+
+message SchedProcessExec {}
+
+message EnterSchedSetAffinity {}
+
+message AffinityChange {}
+
+message AffinityChangeFailed {}
+
+message AffinityChanged {}
+
+message LimeThrottle {}
+
+message LimeThrottleRelease {}
+
+message LimeStartOfTrace {}
+
+message LimeEndOfTrace {}
+
+// Main TraceEvent message
+message TraceEvent {
+    uint64 ts = 1;
+    ThreadId id = 2;
+    EventData event = 3;
+}
+
+message ThreadId {
+    uint32 pid = 1;
+    uint32 tgid = 2;
+} 
