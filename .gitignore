@@ -1,0 +1,12 @@
+
+/target
+.ssh-config
+.vagrant/
+/lime_20*
+/*/*.events*.json
+/*/*.models*.json
+/*/*.infos*.json
+/*/*.accuracy*.json
+/CI/periodic-model-inference/
+
+.DS_Store
