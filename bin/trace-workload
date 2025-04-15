@@ -1,0 +1,172 @@
+#!/bin/bash
+
+# This shell script provides a wrapper for tracing workloads defined
+# by a launch script with lime-rtw.
+
+set -e
+
+# Default: assume `lime-rtw` is available in $PATH
+[ -z "$LIME" ] && LIME=lime-rtw
+
+function info {
+	[ -n "$VERBOSE" ] && echo "[II] $*"
+	true
+}
+
+function die {
+	echo "[EE] $*"
+	exit 1
+}
+
+function usage {
+	[ -n "$1" ] && echo "[EE] $*"
+	echo
+	echo "Usage: trace-workload [-v|--verbose] [-h|--help] [-o|--outdir OUTDIR] [-f|--force]"
+	echo "                      [-l|--lime LIME] [--rr|--fifo] [-c|--capture] [--trace-eBPF] [-d|--duration DURATION]"
+	echo "                      [--extract] [--lime-opts LIME_OPTS] [--] WORKLOAD [WORKLOAD ARGS]"
+	echo
+	echo "Options:"
+	echo "  -v --verbose    provide detailed updates"
+	echo "  -l --lime       LiME binary to use [default: lime-rtw]"
+	echo "  -o --outdir     where the trace directory will be stored"
+	echo "  -f --force      remove the trace directory if it exists"
+	echo "  -c --capture    capture LiME and workload output [in out.log]"
+	echo "  -d --duration   set the DURATION variable in the workload environment"
+	echo "  --rr --fifo     launch workload as SCHED_RR or SCHED_FIFO real-time process"
+	echo "  --extract       extract models [default: record trace]"
+	echo "  --trace-eBPF    set the TRACE_eBPF variable in the workload environment"	
+	echo "  --lime-opts     pass extra flags LIME_OPTS to LiME"
+	echo "  -h --help       show this help message"
+	echo
+	echo "Note: the script expects to be run via sudo."
+	echo
+	exit 2
+}
+
+LIME_MODE=trace
+
+# process command line arguments
+while [ ! -z "$1" ]
+do
+	case $1 in
+		-o|--outdir)
+			shift
+			OUTDIR="$1"
+			shift
+			;;
+		--lime-opts)
+			shift
+			LIME_OPTS="$1"
+			shift
+			;;
+		-l|--lime)
+			shift
+			LIME="$1"
+			shift
+			;;
+		-d|--duration)
+			shift
+			DURATION="$1"
+			shift
+			export DURATION
+			;;
+		--trace-eBPF)
+			shift
+			export TRACE_eBPF=1
+			;;
+		--extract)
+			shift
+			LIME_MODE=extract
+			;;
+		-v|--verbose)
+			shift
+			VERBOSE=1
+			export VERBOSE
+			;;
+		-h|--help)
+			usage
+			;;
+		--rr)
+			shift
+			WANT_RR=1
+			WANT_FIFO=
+			;;
+		--fifo)
+			shift
+			WANT_FIFO=1
+			WANT_RR=
+			;;
+		-c|--capture)
+			shift
+			CAPTURE=1
+			;;
+		-f|--force)
+			shift
+			FORCE=1
+			;;
+		--)
+		    shift
+			WORKLOAD="$1"
+			shift
+			WORKLOAD_ARGS="$*"
+			break
+		    ;;
+		*)
+			WORKLOAD="$1"
+			shift
+			[ -n "$1" ] && die "Unexpected trailing arguments: $*"
+			;;
+	esac
+done
+
+$LIME --version > /dev/null 2>&1 || die "Cannot find and run LiME binary '$LIME'!"
+
+[ -z "$SUDO_USER" ] && die "Not running under sudo."
+info "Running as $USER for $SUDO_USER."
+
+[ -z "$WORKLOAD" ] && usage "No workload specified."
+info "Tracing workload '$WORKLOAD'."
+[ -z "$WORKLOAD_ARGS" ] || info "Workload arguments: '${WORKLOAD_ARGS}'"
+
+[ -e "$WORKLOAD" ] || FOUND=`which $WORKLOAD` && [ -e "$FOUND" ] && info "Found '${FOUND}' in PATH." && WORKLOAD=$FOUND
+[ -e "$WORKLOAD" ] || die "The workload '$WORKLOAD' does not exist and cannot be found in PATH."
+[ -x "$WORKLOAD" ] || die "The workload '$WORKLOAD' is not executable."
+
+EXP_NAME=`basename "${WORKLOAD/.sh/}"`
+
+[ -z "$OUTDIR" ] && info 'OUTDIR is not set; defaulting to /tmp' && OUTDIR=/tmp
+[ -d "$OUTDIR" ] || die "The output directory '$OUTDIR' does not exist."
+
+TRACE_DIR="${OUTDIR}/lime-${EXP_NAME}"
+info "Storing the trace in ${TRACE_DIR}"
+[ -e "${TRACE_DIR}" ] && [ -z "${FORCE}" ] && die "Aborted: trace directory already exists!"
+[ -e "${TRACE_DIR}" ] && [ -n "${FORCE}" ] && info "Removing stale trace directory." && rm -rf ${TRACE_DIR}
+export TRACE_DIR
+
+[ -z "${LIME_OPTS}" ] || info "Extra LiME options provided: ${LIME_OPTS}"
+
+COMMAND="${WORKLOAD} ${WORKLOAD_ARGS}"
+
+[ -n "$WANT_FIFO" ] && info "Launching workload as a SCHED_FIFO process." && COMMAND="schedtool -F -p 10 -e $COMMAND"
+[ -n "$WANT_RR" ] && info "Launching workload as a SCHED_RR process." && COMMAND="schedtool -R -p 10 -e $COMMAND"
+
+[ -n "$DURATION" ] && info "Exporting DURATION=$DURATION."
+[ -n "$TRACE_eBPF" ] && info "Exporting TRACE_eBPF=1."
+
+info "LiME:" $LIME $LIME_MODE -o "${TRACE_DIR}" ${LIME_OPTS} -- ${COMMAND}
+if [ -n "$CAPTURE" ]
+then
+	OUTLOG=`mktemp -t lime-output-XXX`
+	info "Capturing output in '${OUTLOG}'."
+	info "Enter CTRL-C to stop..."
+	$LIME $LIME_MODE -o "${TRACE_DIR}" ${LIME_OPTS} -- ${COMMAND} > "${OUTLOG}" 2>&1 || die "LiME failed!"
+	info "Storing output in '${TRACE_DIR}/out.log'." && mv "${OUTLOG}" "${TRACE_DIR}/out.log" || die 'mv failed'
+else
+	info "Enter CTRL-C to stop..."
+	$LIME $LIME_MODE -o "${TRACE_DIR}" ${LIME_OPTS} -- ${COMMAND} || die "LiME failed!"
+fi
+
+info "Adjusting ownership of trace directory '${TRACE_DIR}' to $SUDO_UID:$SUDO_GID."
+chown -R $SUDO_UID:$SUDO_GID ${TRACE_DIR} || die "chown failed"
+
+info "Done."
