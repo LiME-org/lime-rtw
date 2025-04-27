@@ -191,18 +191,20 @@ impl TracedCmd {
         }
     }
 
-    pub fn start(&self) -> Result<()> {
+    pub fn start(&self, verbose: bool) -> Result<()> {
         let mut sset = SigSet::empty();
         sset.add(sys::signal::Signal::SIGUSR1);
 
-        eprintln!("LiME: launching {:#?}", &self.cmd_line);
+        if verbose {
+            eprintln!("LiME: launching {:#?}", &self.cmd_line);
+        }
 
         sys::signal::kill(self.pid, SIGUSR1)?;
 
         sset.thread_unblock().map_err(Error::new)
     }
 
-    pub fn complete(&self, sig: i32) -> Result<i32> {
+    pub fn complete(&self, sig: i32, verbose: bool) -> Result<i32> {
         let mut s = 0;
 
         if let Ok(SIGINT) = Signal::try_from(sig) {
@@ -210,7 +212,9 @@ impl TracedCmd {
         }
 
         if let WaitStatus::Exited(_, status) = waitpid(self.pid, None)? {
-            eprintln!("LiME: thread {} exited with {}", self.pid, status);
+            if verbose {
+                eprintln!("LiME: thread {} exited with {}", self.pid, status);
+            }
             s = status;
         }
 
@@ -236,7 +240,7 @@ fn bump_memlock_rlimit() -> Result<()> {
 struct BPFTracer<'a> {
     rx: Option<Receiver<Vec<TraceEvent>>>,
     handles: Vec<JoinHandle<Result<i32>>>,
-    trace_cfs: bool,
+    trace_best_effort: bool,
     trace_all: bool,
     verbose: bool,
     tracer_term: Arc<AtomicBool>,
@@ -253,7 +257,7 @@ impl BPFTracer<'_> {
         Self {
             rx: None,
             cmd: None,
-            trace_cfs: false,
+            trace_best_effort: false,
             verbose: false,
             trace_all: false,
             tracer_term: Arc::new(AtomicBool::new(false)),
@@ -268,8 +272,8 @@ impl BPFTracer<'_> {
 
     pub fn init(mut self, ctx: &LimeContext) -> Self {
         self.verbose = ctx.verbose;
-        self.trace_cfs = ctx.trace_cfs;
         self.trace_all = ctx.trace_all;
+        self.trace_best_effort = ctx.trace_best_effort;
         self.cmd = ctx.get_cmd();
         self.limiter_budget = ctx.limiter_budget;
         self.limiter_period = ctx.limiter_period;
@@ -285,25 +289,26 @@ impl BPFTracer<'_> {
         tx: SyncSender<Vec<TraceEvent>>,
         barrier: Arc<Barrier>,
     ) -> JoinHandle<Result<i32>> {
-        let trace_cfs = self.trace_cfs;
         let trace_all = self.trace_all;
+        let trace_best_effort = self.trace_best_effort;
         let tracer_term = self.tracer_term.clone();
         let limiter_period = self.limiter_period;
         let limiter_budget = self.limiter_budget;
         let tx_batch_size = self.tx_batch_size;
         let poll_interval = self.poll_interval;
+        let verbose = self.verbose;
 
         std::thread::spawn(move || {
             let skel_builder = LimeTracerSkelBuilder::default();
 
             let mut open_skel = skel_builder.open().map_err(Error::new)?;
 
-            if trace_cfs {
-                open_skel.rodata().sched_policy_mask = 0x47;
-            }
-
             if !trace_all && (cmd_pid != 0) {
                 open_skel.rodata().target_tgid = cmd_pid;
+            }
+
+            if trace_best_effort {
+                open_skel.rodata().sched_policy_mask = 0x47;
             }
 
             // Begin tracing
@@ -328,11 +333,13 @@ impl BPFTracer<'_> {
             }
             libbpf_rs::set_print(prev);
 
-            eprintln!(
-                "LiME: {} eBPF programs succesfully attached ({} failed)",
-                attached,
-                failed.len()
-            );
+            if verbose {
+                eprintln!(
+                    "LiME: {} eBPF programs succesfully attached ({} failed)",
+                    attached,
+                    failed.len()
+                );
+            }
 
             // event batching
             let event_batch = RefCell::new(Vec::with_capacity(tx_batch_size));
@@ -363,7 +370,9 @@ impl BPFTracer<'_> {
                         RateLimiterResult::Ok => send_batched(event),
                         RateLimiterResult::Throttled => {}
                         RateLimiterResult::ThrottleRelease => {
-                            eprintln!("LiME: Releasing throttle of thread {}", event.id.pid);
+                            if verbose {
+                                eprintln!("LiME: Releasing throttle of thread {}", event.id.pid);
+                            }
                             let mut e2 = event.clone();
                             e2.ev = EventData::LimeThrottleRelease;
 
@@ -371,7 +380,9 @@ impl BPFTracer<'_> {
                             send_batched(event);
                         }
                         RateLimiterResult::Throttling => {
-                            eprintln!("LiME: Dropping events of thread {}", event.id.pid);
+                            if verbose {
+                                eprintln!("LiME: Dropping events of thread {}", event.id.pid);
+                            }
                             limiter.throttle(event.id.pid);
                             let mut e2 = event.clone();
                             e2.ev = EventData::LimeThrottle;
@@ -388,8 +399,10 @@ impl BPFTracer<'_> {
             let rb = builder.build().map_err(Error::new)?;
 
             if cmd_pid == 0 {
-                eprintln!("LiME: tracing started (press Ctrl+C to stop)");
-            } else {
+                if verbose {
+                    eprintln!("LiME: tracing started (press Ctrl+C to stop)");
+                }
+            } else if verbose {
                 eprintln!("LiME: tracing started");
             }
 
@@ -401,7 +414,9 @@ impl BPFTracer<'_> {
                 Self::poll_ringbuf_signal(&rb, Duration::from_millis(250), poll_interval).unwrap();
             }
 
-            eprintln!("\nLiME: tracing stopped");
+            if verbose {
+                eprintln!("\nLiME: tracing stopped");
+            }
 
             let mut batch = event_batch.borrow_mut();
             if !batch.is_empty() {
@@ -410,7 +425,7 @@ impl BPFTracer<'_> {
 
             // limiter.stop();
 
-            if !failed.is_empty() {
+            if !failed.is_empty() && verbose {
                 eprint!("\nLiME: note: failed to attach ");
                 for p in failed.iter() {
                     eprint!(" {}", p)
@@ -428,6 +443,7 @@ impl BPFTracer<'_> {
         barrier: Arc<Barrier>,
     ) -> JoinHandle<Result<i32>> {
         let tracer_term = self.tracer_term.clone();
+        let verbose = self.verbose;
 
         std::thread::spawn(move || {
             let mut signals = signal_hook::iterator::Signals::new([SIGCHLD as i32, SIGINT as i32])?;
@@ -436,14 +452,14 @@ impl BPFTracer<'_> {
             // wait for the tracer
             barrier.wait();
 
-            cmd.as_mut().map(|c| c.start());
+            cmd.as_mut().map(|c| c.start(verbose));
 
             // wait for the launched command to complete or sigint.
             if let Some(signal) = signals.wait().next() {
                 match Signal::try_from(signal) {
                     Ok(SIGCHLD) | Ok(SIGINT) => {
                         if let Some(c) = cmd {
-                            ret = c.complete(signal);
+                            ret = c.complete(signal, verbose);
                         }
                     }
                     _ => unreachable!(),

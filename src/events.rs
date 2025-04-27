@@ -533,7 +533,7 @@ impl From<&EventData> for proto::EventData {
                 sem_id: *sem_id,
                 timeout: *timeout,
             }),
-            EventData::RawSchedulerChange {} => {
+            EventData::RawSchedulerChange => {
                 Event::RawSchedulerChange(proto::RawSchedulerChange {})
             }
             EventData::SchedulerChange { sched_policy } => {
@@ -541,7 +541,7 @@ impl From<&EventData> for proto::EventData {
                     sched_policy: Some(sched_policy.into()),
                 })
             }
-            EventData::SchedulerChangeFailed {} => {
+            EventData::SchedulerChangeFailed => {
                 Event::SchedulerChangeFailed(proto::SchedulerChangeFailed {})
             }
             EventData::SchedulerChanged { sched_policy } => {
@@ -559,27 +559,27 @@ impl From<&EventData> for proto::EventData {
                     sched_policy: Some(sched_policy.into()),
                 })
             }
-            EventData::SchedProcessExit {} => Event::SchedProcessExit(proto::SchedProcessExit {}),
+            EventData::SchedProcessExit => Event::SchedProcessExit(proto::SchedProcessExit {}),
             EventData::SchedProcessFork { sched_policy } => {
                 Event::SchedProcessFork(proto::SchedProcessFork {
                     sched_policy: Some(sched_policy.into()),
                 })
             }
-            EventData::SchedProcessExec {} => Event::SchedProcessExec(proto::SchedProcessExec {}),
-            EventData::EnterSchedSetAffinity {} => {
+            EventData::SchedProcessExec => Event::SchedProcessExec(proto::SchedProcessExec {}),
+            EventData::EnterSchedSetAffinity => {
                 Event::EnterSchedSetAffinity(proto::EnterSchedSetAffinity {})
             }
-            EventData::AffinityChange {} => Event::AffinityChange(proto::AffinityChange {}),
-            EventData::AffinityChangeFailed {} => {
+            EventData::AffinityChange => Event::AffinityChange(proto::AffinityChange {}),
+            EventData::AffinityChangeFailed => {
                 Event::AffinityChangeFailed(proto::AffinityChangeFailed {})
             }
-            EventData::AffinityChanged {} => Event::AffinityChanged(proto::AffinityChanged {}),
-            EventData::LimeThrottle {} => Event::LimeThrottle(proto::LimeThrottle {}),
-            EventData::LimeThrottleRelease {} => {
+            EventData::AffinityChanged => Event::AffinityChanged(proto::AffinityChanged {}),
+            EventData::LimeThrottle => Event::LimeThrottle(proto::LimeThrottle {}),
+            EventData::LimeThrottleRelease => {
                 Event::LimeThrottleRelease(proto::LimeThrottleRelease {})
             }
-            EventData::LimeStartOfTrace {} => Event::LimeStartOfTrace(proto::LimeStartOfTrace {}),
-            EventData::LimeEndOfTrace {} => Event::LimeEndOfTrace(proto::LimeEndOfTrace {}),
+            EventData::LimeStartOfTrace => Event::LimeStartOfTrace(proto::LimeStartOfTrace {}),
+            EventData::LimeEndOfTrace => Event::LimeEndOfTrace(proto::LimeEndOfTrace {}),
         };
 
         proto::EventData { event: Some(event) }

@@ -10,11 +10,13 @@ use crate::{
 };
 
 use anyhow::{Ok, Result};
+use std::collections::HashSet;
 
 pub struct TraceWriter {
     output_dir: LimeOutputDirectory,
     thread_events_dumpers: Dispatcher<TaskId, TraceEventWriter>,
     format: EventsFileFormat,
+    written_files: HashSet<String>,
 }
 
 impl TraceWriter {
@@ -24,6 +26,17 @@ impl TraceWriter {
                 .output_dir
                 .create_events_file(task_id, self.format)
                 .unwrap();
+
+            let filename = format!(
+                "{}.events.{}",
+                task_id,
+                match self.format {
+                    EventsFileFormat::Json => "json",
+                    EventsFileFormat::Protobuf => "proto",
+                }
+            );
+            self.written_files.insert(filename);
+
             TraceEventWriter::new(f, self.format)
         })
     }
@@ -40,6 +53,9 @@ impl TraceWriter {
             if let Some(tinfo) = src.get_task_info(*task_id) {
                 let f = self.output_dir.create_infos_file(task_id).unwrap();
 
+                let filename = format!("{}.infos.json", task_id);
+                self.written_files.insert(filename);
+
                 serde_json::to_writer_pretty(f, &tinfo).unwrap();
             }
         }
@@ -54,6 +70,7 @@ impl TraceWriter {
             output_dir,
             thread_events_dumpers: Dispatcher::new(),
             format,
+            written_files: HashSet::new(),
         }
     }
 }
@@ -96,6 +113,13 @@ impl EventProcessor for TraceWriter {
         self.close(src);
 
         eprintln!("Results saved in {}.", self.output_dir.path());
+
+        if self.written_files.is_empty() {
+            eprintln!("WARNING: No trace files were generated. If you're trying to trace non-real-time processes,");
+            eprintln!(
+                "consider adding the --best-effort flag to trace best-effort (SCHED_OTHER) tasks."
+            );
+        }
 
         Ok(())
     }

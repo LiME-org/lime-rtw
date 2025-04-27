@@ -3,6 +3,7 @@ use std::{
     fs::{File, OpenOptions},
     io::Write,
     path::PathBuf,
+    collections::HashSet,
 };
 
 use crate::{
@@ -71,17 +72,22 @@ pub fn open_task_model_file(base: &str, task_id: &TaskId) -> Result<File> {
 
 pub struct TaskModelJSONWriter {
     base: String,
+    written_files: HashSet<String>,
 }
 
 impl TaskModelJSONWriter {
     pub fn new(base: String) -> Self {
-        Self { base }
+        Self { 
+            base,
+            written_files: HashSet::new(),
+        }
     }
 
-    fn write_thread_infos(&self, task_id: &TaskId, tinfo: &TaskInfos) -> Result<()> {
+    fn write_thread_infos(&mut self, task_id: &TaskId, tinfo: &TaskInfos) -> Result<()> {
         let mut b = PathBuf::from(self.base.clone());
 
         let filename = format!("{}.infos.json", task_id);
+        self.written_files.insert(filename.clone());
 
         b.push(filename);
 
@@ -110,17 +116,19 @@ impl TaskModelJSONWriter {
     }
 
     fn report_thread(
-        &self,
+        &mut self,
         thread_extractor: &ThreadTaskModelExtractor,
         task_id: &TaskId,
     ) -> Result<()> {
+        let filename = format!("{}.models.json", task_id);
+        self.written_files.insert(filename);
+        
         let mut f = open_task_model_file(self.base.as_str(), task_id)?;
-
         TaskModelJSONWriter::write_thread_model(thread_extractor, &mut f)
     }
 
     pub fn write<S: EventSource>(
-        &self,
+        &mut self,
         src: &S,
         extractor: &TaskModelExtractor,
         ctx: &LimeContext,
@@ -135,13 +143,13 @@ impl TaskModelJSONWriter {
             }
 
             if let Some(tinfo) = src.get_task_info(*task_id) {
-                if !ctx.trace_cfs && !tinfo.policy.is_rt_policy() {
+                if !ctx.trace_best_effort && !tinfo.policy.is_rt_policy() {
                     // This is not a real-time task and we want to
                     // report only real-time tasks.
                     continue;
                 }
                 self.write_thread_infos(task_id, &tinfo)?;
-            } else if !ctx.trace_cfs {
+            } else if !ctx.trace_best_effort {
                 // We don't know what it is, and we want to report
                 // only (confirmed) real-time tasks => let's ignore
                 // this one.
@@ -149,6 +157,11 @@ impl TaskModelJSONWriter {
             }
 
             self.report_thread(e, task_id)?;
+        }
+
+        if self.written_files.is_empty() {
+            eprintln!("WARNING: No model files were generated. If you're trying to analyze non-real-time processes,");
+            eprintln!("consider adding the --best-effort flag to include best-effort (SCHED_OTHER) tasks.");
         }
 
         Ok(())

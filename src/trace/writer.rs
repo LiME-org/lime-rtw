@@ -17,6 +17,15 @@ pub enum EventsFileFormat {
     Protobuf,
 }
 
+impl EventsFileFormat {
+    pub fn extension(&self) -> &'static str {
+        match self {
+            EventsFileFormat::Json => "json",
+            EventsFileFormat::Protobuf => "proto",
+        }
+    }
+}
+
 impl FromStr for EventsFileFormat {
     type Err = String;
 

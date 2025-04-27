@@ -115,6 +115,7 @@ impl TaskJobExtractor {
 pub struct JobExtractor {
     output_dir: LimeOutputDirectory,
     task_job_extractors: Dispatcher<TaskId, TaskJobExtractor>,
+    job_files_written: usize,
 }
 
 impl JobExtractor {
@@ -122,12 +123,15 @@ impl JobExtractor {
         Self {
             output_dir: output_directory,
             task_job_extractors: Dispatcher::new(),
+            job_files_written: 0,
         }
     }
 
-    fn write(&self) -> Result<()> {
+    fn write(&mut self) -> Result<()> {
         for (task_id, j) in self.task_job_extractors.items() {
-            j.write(self.output_dir.path(), task_id)?;
+            if j.write(self.output_dir.path(), task_id).is_ok() {
+                self.job_files_written += 1;
+            }
         }
 
         Ok(())
@@ -174,6 +178,11 @@ impl EventProcessor for JobExtractor {
         self.write()?;
 
         eprintln!("Results saved in {}.", self.output_dir.path());
+
+        if self.job_files_written == 0 {
+            eprintln!("WARNING: No job files were generated. If you're trying to analyze non-real-time processes,");
+            eprintln!("consider adding the --best-effort flag to include best-effort (SCHED_OTHER) tasks.");
+        }
 
         Ok(())
     }

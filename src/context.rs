@@ -31,7 +31,7 @@ pub struct LimeContext {
     /// traced. Otherwise, only trace thread launched by LiME and their children.
     pub trace_all: bool,
     /// If true, add CFS to the set of tracked scheduling policies.
-    pub trace_cfs: bool,
+    pub trace_best_effort: bool,
     /// Rate limiter period.
     pub limiter_period: Duration,
     /// Rate limiter budget.
@@ -108,7 +108,7 @@ impl From<&CLI> for LimeContext {
             rbf_horizon: cli_opts.rbf_horizon().unwrap_or_default(),
             rbf_min_sep: cli_opts.rbf_min_sep().unwrap_or_default(),
             trace_all: cli_opts.trace_all(),
-            trace_cfs: cli_opts.trace_cfs(),
+            trace_best_effort: cli_opts.trace_best_effort(),
             all_threads: cli_opts.all_threads(),
             cmd_vec: cli_opts.get_cmd_vec().cloned().unwrap_or_default(),
             limiter_period: cli_opts.rate_limiter_period().unwrap_or_default(),

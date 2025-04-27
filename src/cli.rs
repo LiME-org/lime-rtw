@@ -63,9 +63,9 @@ pub enum LimeSubCommand {
         #[clap(long = "all")]
         trace_all: bool,
 
-        /// Trace events emitted by CFS tasks.
-        #[clap(long = "cfs")]
-        trace_cfs: bool,
+        /// Trace events emitted by best-effort tasks.
+        #[clap(long = "best-effort")]
+        trace_best_effort: bool,
 
         /// EBPF ring buffer poll interval
         #[clap(long, value_parser = parse_duration, default_value="10ms")]
@@ -161,9 +161,9 @@ pub enum LimeSubCommand {
         #[clap(long = "all")]
         trace_all: bool,
 
-        /// Extract models for CFS tasks.
-        #[clap(long = "cfs")]
-        trace_cfs: bool,
+        /// Extract models for best-effort tasks.
+        #[clap(long = "best-effort")]
+        trace_best_effort: bool,
 
         /// EBPF ring buffer poll interval
         #[clap(long, value_parser = parse_duration, default_value="10ms")]
@@ -238,11 +238,15 @@ impl CLI {
         false
     }
 
-    pub fn trace_cfs(&self) -> bool {
+    pub fn trace_best_effort(&self) -> bool {
         match &self.command {
             #[cfg(target_os = "linux")]
-            LimeSubCommand::Trace { trace_cfs, .. } => *trace_cfs,
-            LimeSubCommand::Extract { trace_cfs, .. } => *trace_cfs,
+            LimeSubCommand::Trace {
+                trace_best_effort, ..
+            } => *trace_best_effort,
+            LimeSubCommand::Extract {
+                trace_best_effort, ..
+            } => *trace_best_effort,
             _ => false,
         }
     }

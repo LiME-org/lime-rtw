@@ -17,7 +17,6 @@ use anyhow::Result;
 pub struct TaskModelExtractor {
     extractors: Dispatcher<TaskId, ThreadTaskModelExtractor<'static>>,
     output_directory: LimeOutputDirectory,
-    // writer: TaskModelJSONWriter,
 }
 
 impl TaskModelExtractor {
@@ -56,17 +55,23 @@ impl TaskModelExtractor {
         task_id: &TaskId,
         extractor: &ThreadTaskModelExtractor,
         infos: &Option<TaskInfos>,
-    ) -> Result<()> {
+    ) -> Result<(bool, bool)> {
+        let mut info_file_created = false;
+        let mut model_file_created = false;
+
         if let Some(infos) = infos {
             if let Ok(mut f_infos) = self.output_directory.create_infos_file(task_id) {
+                info_file_created = true;
                 _ = self.write_thread_infos(&mut f_infos, infos);
             }
         }
 
-        let mut f_models = self.output_directory.create_models_file(task_id)?;
-        self.write_thread_model(&mut f_models, extractor)?;
+        if let Ok(mut f_models) = self.output_directory.create_models_file(task_id) {
+            model_file_created = true;
+            self.write_thread_model(&mut f_models, extractor)?;
+        }
 
-        Ok(())
+        Ok((info_file_created, model_file_created))
     }
 }
 
@@ -96,7 +101,7 @@ impl EventProcessor for TaskModelExtractor {
     }
 
     fn finalize<S: EventSource>(&mut self, src: &S, ctx: &LimeContext) -> Result<()> {
-        // Notifify end of trace to extractors
+        // Notify end of trace to extractors
         let id = ThreadId::new(0, 0);
         let e = TraceEvent {
             ts: 0,
@@ -109,17 +114,46 @@ impl EventProcessor for TaskModelExtractor {
             extractor.flush();
         }
 
-        for (task_id, extractor) in self.extractors.items() {
-            let infos = src.get_task_info(*task_id);
+        // Process all tasks
+        let mut total_files = 0;
 
-            if !extractor.should_report(ctx, &infos) {
-                continue;
+        // First, collect all task IDs that should be reported
+        let reportable_tasks: Vec<(TaskId, bool)> = self
+            .extractors
+            .items()
+            .filter_map(|(task_id, extractor)| {
+                let infos = src.get_task_info(*task_id);
+                if extractor.should_report(ctx, &infos) {
+                    Some((*task_id, infos.is_some()))
+                } else {
+                    None
+                }
+            })
+            .collect();
+
+        // Then, report each task
+        for (task_id, has_info) in reportable_tasks {
+            let extractor = self.extractors.get(&task_id).unwrap();
+            let infos = if has_info {
+                src.get_task_info(task_id)
+            } else {
+                None
+            };
+
+            if let Ok((info_created, model_created)) = self.report_task(&task_id, extractor, &infos)
+            {
+                if info_created || model_created {
+                    total_files += 1;
+                }
             }
-
-            self.report_task(task_id, extractor, &infos)?;
         }
 
         eprintln!("Results saved in {}.", ctx.output_dir.path());
+
+        if total_files == 0 {
+            eprintln!("WARNING: No model files were generated. If you're trying to analyze non-real-time processes,");
+            eprintln!("consider adding the --best-effort flag to include best-effort (SCHED_OTHER) tasks.");
+        }
 
         Ok(())
     }

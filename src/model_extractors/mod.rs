@@ -159,12 +159,12 @@ impl ThreadTaskModelExtractor<'_> {
         }
 
         if let Some(infos) = infos {
-            if !ctx.trace_cfs && !infos.policy.is_rt_policy() {
+            if !ctx.trace_best_effort && !infos.policy.is_rt_policy() {
                 // This is not a real-time task and we want to
                 // report only real-time tasks.
                 return false;
             }
-        } else if !ctx.trace_cfs {
+        } else if !ctx.trace_best_effort {
             // We don't know what it is, and we want to report
             // only (confirmed) real-time tasks => let's ignore
             // this one.

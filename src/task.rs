@@ -334,7 +334,7 @@ pub mod mapper {
             self.tracked_policies.insert(SCHED_RR);
             self.tracked_policies.insert(SCHED_DEADLINE);
 
-            if ctx.trace_cfs {
+            if ctx.trace_best_effort {
                 self.tracked_policies.insert(SCHED_BATCH);
                 self.tracked_policies.insert(SCHED_OTHER);
                 self.tracked_policies.insert(SCHED_IDLE);
