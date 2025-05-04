@@ -335,7 +335,7 @@ impl BPFTracer<'_> {
 
             if verbose {
                 eprintln!(
-                    "LiME: {} eBPF programs succesfully attached ({} failed)",
+                    "LiME: {} eBPF programs successfully attached ({} failed)",
                     attached,
                     failed.len()
                 );
