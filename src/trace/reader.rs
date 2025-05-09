@@ -155,7 +155,7 @@ impl TraceReader {
 
     pub fn read_thread_infos<P: AsRef<Path>>(path: P) -> Result<TaskInfos> {
         let file = File::open(path)?;
-        let tinfo: TaskInfos = serde_json::from_reader(file)?;
+        let tinfo: TaskInfos = serde_json::from_reader(BufReader::new(file))?;
         Ok(tinfo)
     }
 
@@ -166,7 +166,7 @@ impl TraceReader {
             .map_err(|e| anyhow::anyhow!("Failed to get task IDs: {}", e))?;
         for task_id in task_ids {
             if let Ok(file) = self.output_dir.open_infos_file(&task_id) {
-                if let Ok(infos) = serde_json::from_reader(file) {
+                if let Ok(infos) = serde_json::from_reader(BufReader::new(file)) {
                     self.task_infos.insert(task_id, infos);
                 }
             }
