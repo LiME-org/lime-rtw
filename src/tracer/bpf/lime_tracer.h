@@ -127,12 +127,14 @@ struct enter_select {
     u64 inp;
     long int tv_sec;
     long int tv_usec;
+    bool tvp_null;
 };
 
 struct enter_pselect6 {
     u64 inp;
     long int tv_sec;
     long int tv_nsec;
+    bool tsp_null;
 };
 
 struct enter_poll {

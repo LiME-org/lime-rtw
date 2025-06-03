@@ -146,11 +146,13 @@ message EnterClockNanoSleep {
 message EnterSelect {
     uint64 inp = 1;
     int64 timeout_usec = 2;
+    bool tvp_null = 3;
 }
 
 message EnterPselect6 {
     uint64 inp = 1;
     int64 timeout_nsec = 2;
+    bool tsp_null = 3;
 }
 
 message EnterPoll {

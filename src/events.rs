@@ -233,12 +233,14 @@ pub enum EventData {
         #[serde(with = "SerHex::<CompactPfx>")]
         inp: u64,
         timeout_usec: i64,
+        tvp_null: bool,
     },
 
     EnterPselect6 {
         #[serde(with = "SerHex::<CompactPfx>")]
         inp: u64,
         timeout_nsec: i64,
+        tsp_null: bool,
     },
 
     EnterPoll {
@@ -441,18 +443,24 @@ impl From<&EventData> for proto::EventData {
                 abs_time: *abs_time,
                 required_ns: *required_ns,
             }),
-            EventData::EnterSelect { inp, timeout_usec } => {
-                Event::EnterSelect(proto::EnterSelect {
-                    inp: *inp,
-                    timeout_usec: *timeout_usec,
-                })
-            }
-            EventData::EnterPselect6 { inp, timeout_nsec } => {
-                Event::EnterPselect6(proto::EnterPselect6 {
-                    inp: *inp,
-                    timeout_nsec: *timeout_nsec,
-                })
-            }
+            EventData::EnterSelect {
+                inp,
+                timeout_usec,
+                tvp_null,
+            } => Event::EnterSelect(proto::EnterSelect {
+                inp: *inp,
+                timeout_usec: *timeout_usec,
+                tvp_null: *tvp_null,
+            }),
+            EventData::EnterPselect6 {
+                inp,
+                timeout_nsec,
+                tsp_null,
+            } => Event::EnterPselect6(proto::EnterPselect6 {
+                inp: *inp,
+                timeout_nsec: *timeout_nsec,
+                tsp_null: *tsp_null,
+            }),
             EventData::EnterPoll { pfds, timeout_nsec } => Event::EnterPoll(proto::EnterPoll {
                 pfds: *pfds,
                 timeout_nsec: *timeout_nsec,
@@ -653,10 +661,12 @@ impl From<&proto::event_data::Event> for EventData {
             Event::EnterSelect(e) => EventData::EnterSelect {
                 inp: e.inp,
                 timeout_usec: e.timeout_usec,
+                tvp_null: e.tvp_null,
             },
             Event::EnterPselect6(e) => EventData::EnterPselect6 {
                 inp: e.inp,
                 timeout_nsec: e.timeout_nsec,
+                tsp_null: e.tsp_null,
             },
             Event::EnterPoll(e) => EventData::EnterPoll {
                 pfds: e.pfds,

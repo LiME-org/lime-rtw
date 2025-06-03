@@ -959,11 +959,18 @@ int on_sys_enter_select(struct select_args *ctx) {
   event->pid_tgid = bpf_get_current_pid_tgid();
   event->evd.enter_select.inp = (u64)ctx->inp;
 
-  bpf_core_read_user(&event->evd.enter_select.tv_sec, sizeof(long int),
-                     &tvp->tv_sec);
+  if (tvp == NULL) {
+    event->evd.enter_select.tvp_null = true;
+    event->evd.enter_select.tv_sec = 0;
+    event->evd.enter_select.tv_usec = 0;
+  } else {
+    event->evd.enter_select.tvp_null = false;
+    bpf_core_read_user(&event->evd.enter_select.tv_sec, sizeof(long int),
+                       &tvp->tv_sec);
 
-  bpf_core_read_user(&event->evd.enter_select.tv_usec, sizeof(long int),
-                     &tvp->tv_usec);
+    bpf_core_read_user(&event->evd.enter_select.tv_usec, sizeof(long int),
+                       &tvp->tv_usec);
+  }
 
   submit_event(event);
 
@@ -999,11 +1006,18 @@ int on_sys_enter_pselect6(struct pselect6_args *ctx) {
   event->pid_tgid = bpf_get_current_pid_tgid();
   event->evd.enter_select.inp = (u64)ctx->inp;
 
-  bpf_core_read_user(&event->evd.enter_pselect6.tv_sec, sizeof(long int),
-                     &tsp->tv_sec);
+  if (tsp == NULL) {
+    event->evd.enter_pselect6.tsp_null = true;
+    event->evd.enter_pselect6.tv_sec = 0;
+    event->evd.enter_pselect6.tv_nsec = 0;
+  } else {
+    event->evd.enter_pselect6.tsp_null = false;
+    bpf_core_read_user(&event->evd.enter_pselect6.tv_sec, sizeof(long int),
+                       &tsp->tv_sec);
 
-  bpf_core_read_user(&event->evd.enter_pselect6.tv_nsec, sizeof(long int),
-                     &tsp->tv_nsec);
+    bpf_core_read_user(&event->evd.enter_pselect6.tv_nsec, sizeof(long int),
+                       &tsp->tv_nsec);
+  }
 
   submit_event(event);
 

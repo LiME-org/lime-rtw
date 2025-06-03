@@ -10,6 +10,8 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 - TUI viewer: Provides a Text User Interface (TUI) to view extracted results
   - Use command: lime-rtw view 'results-folder'
+- Enhanced pselect6/select eBPF probes: Added NULL pointer detection for timespec parameters
+  - Note: Model extraction remains unchanged; planned improvements for future releases will incorporate this enhancement
 
 ### Fixed
 

@@ -91,6 +91,7 @@ impl From<&RawEvent> for EventData {
                 EventData::EnterSelect {
                     inp: unsafe { event.evd.enter_select.inp },
                     timeout_usec,
+                    tvp_null: unsafe { event.evd.enter_select.tvp_null },
                 }
             }
 
@@ -102,6 +103,7 @@ impl From<&RawEvent> for EventData {
                 EventData::EnterPselect6 {
                     inp: unsafe { event.evd.enter_select.inp },
                     timeout_nsec,
+                    tsp_null: unsafe { event.evd.enter_pselect6.tsp_null },
                 }
             }
 
