@@ -66,10 +66,14 @@ impl ArrivalCurve {
 
 impl ArrivalModelExtractor for ArrivalCurve {
     fn extract(&self) -> Option<ArrivalModel<'_>> {
-        Some(ArrivalModel::ArrivalCurve {
-            dmins: Cow::from(self.dmins.as_slice()),
-            dmaxs: Cow::from(self.dmaxs.as_slice()),
-        })
+        if self.dmaxs.iter().all(|&x| x == 0) {
+            None
+        } else {
+            Some(ArrivalModel::ArrivalCurve {
+                dmins: Cow::from(self.dmins.as_slice()),
+                dmaxs: Cow::from(self.dmaxs.as_slice()),
+            })
+        }
     }
 }
 
