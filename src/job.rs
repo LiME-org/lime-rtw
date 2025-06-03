@@ -4,14 +4,14 @@ use crate::{
     interval::TimeInterval,
     ir::timeline::{layers::Layer, Timeline},
 };
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 
 /// Job timing data.
 ///
 /// This struct contains all the important time in the lifetime of a job.
 /// It can also query the associated timeline to gather more informations for
 /// model extractors.
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Job {
     /// Time at which is supposed
     /// to arrive in the system.

@@ -34,6 +34,8 @@ pub mod job;
 
 pub mod io;
 
+pub mod view;
+
 // Include the generated protobuf code
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/lime.rs"));

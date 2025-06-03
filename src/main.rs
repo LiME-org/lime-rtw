@@ -2,8 +2,8 @@ use anyhow::{Error, Result};
 use clap::Parser;
 use lime_rtw::{
     context::LimeContext, processors::extract_job::JobExtractor,
-    processors::extract_model::TaskModelExtractor, trace::reader::TraceReader, EventProcessor,
-    EventSource,
+    processors::extract_model::TaskModelExtractor, trace::reader::TraceReader, view::ViewProcessor,
+    EventProcessor, EventSource,
 };
 
 #[cfg(target_os = "linux")]
@@ -30,6 +30,9 @@ pub fn run<C: EventProcessor>(mut command: C, opts: &CLI, ctx: LimeContext) -> R
                 .start()
                 .process_events(command, &ctx)?;
         }
+        EventSourceType::ViewFolder(path) => {
+            ViewProcessor::new(&path).run(&ctx)?;
+        }
     }
 
     Ok(())
@@ -54,6 +57,10 @@ fn main() -> Result<(), Error> {
         LimeSubCommand::ExtractJobs { .. } => {
             let processor = JobExtractor::from(&ctx);
 
+            run(processor, &opts, ctx)
+        }
+        LimeSubCommand::View { folder } => {
+            let processor = ViewProcessor::new(folder);
             run(processor, &opts, ctx)
         }
     }
