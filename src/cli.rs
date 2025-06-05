@@ -80,6 +80,7 @@ pub enum EventSourceType {
     #[cfg(target_os = "linux")]
     BPFTracer,
     TraceFolder(String),
+    #[cfg(feature = "tui")]
     ViewFolder(String),
 }
 
@@ -276,6 +277,7 @@ pub enum LimeSubCommand {
     },
 
     /// View traced results and extracted models in a TUI
+    #[cfg(feature = "tui")]
     View {
         /// Path to the folder containing trace results and extracted models/jobs
         folder: String,
@@ -376,6 +378,7 @@ impl CLI {
                 EventSourceType::TraceFolder(path.clone())
             }
 
+            #[cfg(feature = "tui")]
             LimeSubCommand::View { folder, .. } => EventSourceType::ViewFolder(folder.clone()),
         }
     }
@@ -384,6 +387,7 @@ impl CLI {
         match &self.command {
             LimeSubCommand::Extract { inplace, .. } => *inplace,
             LimeSubCommand::ExtractJobs { inplace, .. } => *inplace,
+            #[cfg(feature = "tui")]
             LimeSubCommand::View { .. } => false,
             #[cfg(target_os = "linux")]
             _ => false,
@@ -395,6 +399,7 @@ impl CLI {
             match &self.command {
                 LimeSubCommand::Extract { from, .. } => return from.clone(),
                 LimeSubCommand::ExtractJobs { from, .. } => return Some(from.clone()),
+                #[cfg(feature = "tui")]
                 LimeSubCommand::View { folder, .. } => return Some(folder.clone()),
                 #[cfg(target_os = "linux")]
                 _ => {}
@@ -406,6 +411,7 @@ impl CLI {
             LimeSubCommand::Trace { output, .. } => output.clone(),
             LimeSubCommand::Extract { output, .. } => output.clone(),
             LimeSubCommand::ExtractJobs { output, .. } => output.clone(),
+            #[cfg(feature = "tui")]
             LimeSubCommand::View { folder, .. } => Some(folder.clone()),
         }
     }

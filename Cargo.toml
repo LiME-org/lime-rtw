@@ -6,8 +6,9 @@ edition = "2021"
 # See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
 
 [features]
-default = []
+default = ["tui"]
 proto = ["dep:prost", "dep:prost-types", "dep:prost-build"]
+tui = ["dep:crossterm", "dep:tui"]
 
 [dependencies]
 anyhow = "1.0"
@@ -31,8 +32,8 @@ prost-types = { version = "0.14", optional = true }
 rustc-hash = "2"
 lime-model-extractors = { git = "https://github.com/LiME-org/lime-model-extractors" }
 # TUI dependencies
-crossterm = "0.29"
-tui = { package = "ratatui", version = "0.30.0" }
+crossterm = { version = "0.29", optional = true }
+tui = { package = "ratatui", version = "0.30.0", optional = true }
 
 [target.'cfg(target_os="linux")'.dependencies]
 libbpf-rs = "0.26"

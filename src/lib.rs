@@ -34,6 +34,7 @@ pub mod job;
 
 pub mod io;
 
+#[cfg(feature = "tui")]
 pub mod view;
 
 pub mod sysinfo;
