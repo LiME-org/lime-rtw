@@ -39,6 +39,7 @@ pub mod view;
 pub mod sysinfo;
 
 // Include the generated protobuf code
+#[cfg(feature = "proto")]
 pub mod proto {
     include!(concat!(env!("OUT_DIR"), "/lime.rs"));
 }

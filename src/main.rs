@@ -26,7 +26,7 @@ pub fn run<C: EventProcessor>(mut command: C, opts: &CLI, ctx: LimeContext) -> R
             std::process::exit(src.exit_status())
         }
         EventSourceType::TraceFolder(path) => {
-            TraceReader::new(path)
+            TraceReader::new(&path)
                 .start()
                 .process_events(command, &ctx)?;
         }

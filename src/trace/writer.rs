@@ -6,14 +6,17 @@ use std::{
     str::FromStr,
 };
 
-use crate::{events::TraceEvent, proto};
+use crate::events::TraceEvent;
 use anyhow::Result;
-use prost::Message;
+
+#[cfg(feature = "proto")]
+use {crate::proto, prost::Message};
 
 /// Output format for trace events
 #[derive(Debug, Clone, Copy, clap::ValueEnum, PartialEq, Eq)]
 pub enum EventsFileFormat {
     Json,
+    #[cfg(feature = "proto")]
     Protobuf,
 }
 
@@ -21,6 +24,7 @@ impl EventsFileFormat {
     pub fn extension(&self) -> &'static str {
         match self {
             EventsFileFormat::Json => "json",
+            #[cfg(feature = "proto")]
             EventsFileFormat::Protobuf => "proto",
         }
     }
@@ -30,12 +34,19 @@ impl FromStr for EventsFileFormat {
     type Err = String;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        if s.eq_ignore_ascii_case("json") {
-            Ok(EventsFileFormat::Json)
-        } else if s.eq_ignore_ascii_case("protobuf") {
-            Ok(EventsFileFormat::Protobuf)
-        } else {
-            Err(format!("Unknown format: {s}"))
+        match s.to_lowercase().as_str() {
+            "json" => Ok(EventsFileFormat::Json),
+            "protobuf" => {
+                #[cfg(feature = "proto")]
+                {
+                    Ok(EventsFileFormat::Protobuf)
+                }
+                #[cfg(not(feature = "proto"))]
+                {
+                    Err("Protobuf format is not enabled at compile time".to_string())
+                }
+            }
+            _ => Err(format!("Unknown format: {}", s)),
         }
     }
 }
@@ -58,6 +69,7 @@ impl TraceEventWriter {
     pub fn write(&mut self, event: &TraceEvent) -> Result<()> {
         match self.format {
             EventsFileFormat::Json => self.write_json(event),
+            #[cfg(feature = "proto")]
             EventsFileFormat::Protobuf => self.write_protobuf(event),
         }
     }
@@ -75,6 +87,7 @@ impl TraceEventWriter {
         Ok(())
     }
 
+    #[cfg(feature = "proto")]
     #[inline]
     fn write_protobuf(&mut self, event: &TraceEvent) -> Result<()> {
         let proto_event = proto::TraceEvent::from(event);
@@ -99,6 +112,7 @@ impl TraceEventWriter {
                 self.file.write_all(b"\n]")?;
                 self.file.flush()?;
             }
+            #[cfg(feature = "proto")]
             EventsFileFormat::Protobuf => {
                 self.file.flush()?;
             }

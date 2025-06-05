@@ -3,24 +3,28 @@
 use std::{
     collections::HashMap,
     fs::File,
-    io::{BufRead, BufReader, Lines, Read},
+    io::{BufRead, BufReader, Lines},
     path::Path,
     sync::mpsc::Receiver,
 };
 
 use crate::{
     context::LimeContext,
-    events::{EventData, TraceEvent},
+    events::TraceEvent,
     io::LimeOutputDirectory,
-    proto,
     task::{TaskId, TaskInfos},
     trace::writer::EventsFileFormat,
-    utils::ThreadId,
     EventProcessor, EventSource,
 };
 
-use anyhow::Result;
-use prost::Message;
+use anyhow::{bail, Result};
+
+#[cfg(feature = "proto")]
+use {
+    crate::{events::EventData, proto, utils::ThreadId},
+    prost::Message,
+    std::io::Read,
+};
 
 struct TraceEvents {
     lines: Lines<BufReader<File>>,
@@ -76,10 +80,12 @@ impl From<File> for TraceEvents {
     }
 }
 
+#[cfg(feature = "proto")]
 struct ProtobufTraceEvents {
     reader: BufReader<File>,
 }
 
+#[cfg(feature = "proto")]
 impl ProtobufTraceEvents {
     fn read_next_event(&mut self) -> Option<Result<TraceEvent>> {
         let mut length_buf = [0u8; 10];
@@ -128,6 +134,7 @@ impl ProtobufTraceEvents {
     }
 }
 
+#[cfg(feature = "proto")]
 impl Iterator for ProtobufTraceEvents {
     type Item = Result<TraceEvent>;
 
@@ -187,12 +194,22 @@ impl TraceReader {
                 .map_err(|e| anyhow::anyhow!("Failed to retrieve task IDs: {}", e))?;
             for task_id in task_ids {
                 let format = if output_dir
-                    .get_events_file_path(&task_id, EventsFileFormat::Protobuf)
+                    .get_events_file_path(&task_id, EventsFileFormat::Json)
                     .exists()
                 {
-                    EventsFileFormat::Protobuf
-                } else {
                     EventsFileFormat::Json
+                } else {
+                    #[cfg(feature = "proto")]
+                    if output_dir
+                        .get_events_file_path(&task_id, EventsFileFormat::Protobuf)
+                        .exists()
+                    {
+                        EventsFileFormat::Protobuf
+                    } else {
+                        bail!("No events file found for task {}", task_id)
+                    }
+                    #[cfg(not(feature = "proto"))]
+                    bail!("No events file found for task {}", task_id)
                 };
 
                 let file = output_dir.open_events_file(&task_id, format)?;
@@ -204,6 +221,7 @@ impl TraceReader {
                             tx.send((task_id, e))?;
                         }
                     }
+                    #[cfg(feature = "proto")]
                     EventsFileFormat::Protobuf => {
                         let reader = ProtobufTraceEvents {
                             reader: BufReader::new(file),

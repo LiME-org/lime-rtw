@@ -69,7 +69,8 @@ impl Display for LimeFile {
             LimeFile::Events(t, format) => {
                 let ext = match format {
                     EventsFileFormat::Json => "json",
-                    EventsFileFormat::Protobuf => "pb",
+                    #[cfg(feature = "proto")]
+                    EventsFileFormat::Protobuf => "proto",
                 };
                 write!(f, "{t}.events.{ext}")
             }
@@ -99,10 +100,19 @@ impl TryFrom<&Path> for LimeFile {
                 match t {
                     "events" => {
                         let tokens: Vec<&str> = fname.to_str().unwrap().split('.').collect();
-                        let format = if tokens.iter().rev().nth(0) == Some(&"pb") {
-                            EventsFileFormat::Protobuf
-                        } else {
-                            EventsFileFormat::Json
+                        let format = match tokens.iter().rev().nth(0) {
+                            Some(&"proto") => {
+                                #[cfg(feature = "proto")]
+                                {
+                                    EventsFileFormat::Protobuf
+                                }
+                                #[cfg(not(feature = "proto"))]
+                                {
+                                    bail!("Protobuf format is not enabled at compile time")
+                                }
+                            }
+                            Some(&"json") => EventsFileFormat::Json,
+                            _ => bail!("Unknown file extension"),
                         };
                         return Ok(LimeFile::Events(task_id, format));
                     }

@@ -95,6 +95,7 @@ pub enum LimeSubCommand {
         output: Option<String>,
 
         /// Output format (json or protobuf), only apply to events files
+        #[cfg(feature = "proto")]
         #[clap(long, default_value = "json")]
         format: EventsFileFormat,
 
@@ -547,12 +548,11 @@ impl CLI {
 
     pub fn output_format(&self) -> EventsFileFormat {
         match &self.command {
-            #[cfg(target_os = "linux")]
-            LimeSubCommand::Trace {
-                format: output_format,
-                ..
-            } => *output_format,
-            _ => EventsFileFormat::Json, // Default to JSON for other commands
+            #[cfg(all(target_os = "linux", feature = "proto"))]
+            LimeSubCommand::Trace { format, .. } => *format,
+            #[cfg(all(target_os = "linux", not(feature = "proto")))]
+            LimeSubCommand::Trace { .. } => EventsFileFormat::Json,
+            _ => EventsFileFormat::Json,
         }
     }
 
