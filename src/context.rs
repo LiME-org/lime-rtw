@@ -47,6 +47,11 @@ pub struct LimeContext {
     /// If true, do not update RBFs until syscall job separator is detected.
     pub no_init_rbf_update: bool,
 
+    /// Time filter: only process events after this absolute timestamp
+    pub time_filter_after: Option<u64>,
+    /// Time filter: only process events before this absolute timestamp
+    pub time_filter_before: Option<u64>,
+
     /// Only extract RBF when the flag is set.
     pub enable_rbf: bool,
     /// Maximum number of step of RBF extracted by the variable-sized-steps
@@ -122,6 +127,8 @@ impl From<&CLI> for LimeContext {
             tx_batch_size: cli_opts.tx_batch_size(),
             ebpf_poll_interval: cli_opts.ebpf_poll_interval(),
             output_format: cli_opts.output_format(),
+            time_filter_after: cli_opts.time_filter_after(),
+            time_filter_before: cli_opts.time_filter_before(),
         }
     }
 }

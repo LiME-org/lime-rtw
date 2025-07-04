@@ -222,6 +222,23 @@ impl TraceReader {
     }
 }
 
+/// Determines if an event should be processed based on timestamp filters and event type
+fn should_process_event(event: &TraceEvent, ctx: &LimeContext) -> bool {
+    // Always allow special trace events to pass through
+    if matches!(
+        event.ev,
+        crate::events::EventData::LimeStartOfTrace | crate::events::EventData::LimeEndOfTrace
+    ) {
+        return true;
+    }
+
+    // Apply timestamp filtering for regular events
+    ctx.time_filter_after.is_none_or(|after| event.ts >= after)
+        && ctx
+            .time_filter_before
+            .is_none_or(|before| event.ts < before)
+}
+
 impl EventSource for TraceReader {
     fn event_loop<E: EventProcessor>(
         &mut self,
@@ -231,8 +248,11 @@ impl EventSource for TraceReader {
         self.populate_thread_infos()?;
 
         let rx = self.rx.as_mut().unwrap();
+
         for (task_id, event) in rx.iter() {
-            processor.consume_event(&task_id, event, ctx);
+            if should_process_event(&event, ctx) {
+                processor.consume_event(&task_id, event, ctx);
+            }
         }
 
         let handle = self.event_reader.take().unwrap();

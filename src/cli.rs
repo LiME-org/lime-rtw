@@ -17,11 +17,24 @@
 use std::time::Duration;
 
 use crate::trace::writer::EventsFileFormat;
+
 use clap::{Parser, Subcommand};
 use duration_str::DResult;
 
 fn parse_duration(s: &str) -> DResult<Duration> {
     duration_str::parse(s)
+}
+
+/// Parse timestamp from string. Supports:
+/// - Raw nanoseconds: "1000000000" (CLOCK_BOOTTIME)
+fn parse_boot_time(s: &str) -> Result<u64, String> {
+    // Parse as raw nanoseconds (CLOCK_BOOTTIME)
+    s.parse::<u64>().map_err(|_| {
+        format!(
+            "Failed to parse timestamp: '{s}'. Supported format:\n\
+            - Raw nanoseconds: 1000000000 (CLOCK_BOOTTIME)"
+        )
+    })
 }
 
 #[derive(Debug, Parser)]
@@ -123,6 +136,16 @@ pub enum LimeSubCommand {
         /// a recorded trace. Ignored otherwise.
         #[clap(long)]
         inplace: bool,
+
+        /// Only process events after this absolute timestamp.
+        /// Supports: nanoseconds (CLOCK_BOOTTIME i.e. 1000000000)
+        #[clap(long, value_parser = parse_boot_time)]
+        after: Option<u64>,
+
+        /// Only process events before this absolute timestamp.
+        /// Supports: nanoseconds (CLOCK_BOOTTIME i.e. 1000000000)
+        #[clap(long, value_parser = parse_boot_time)]
+        before: Option<u64>,
 
         /// Max window length for WCET(n)
         #[clap(long, default_value = "32")]
@@ -475,6 +498,20 @@ impl CLI {
                 ..
             } => *output_format,
             _ => EventsFileFormat::Json, // Default to JSON for other commands
+        }
+    }
+
+    pub fn time_filter_after(&self) -> Option<u64> {
+        match &self.command {
+            LimeSubCommand::Extract { after, .. } => *after,
+            _ => None,
+        }
+    }
+
+    pub fn time_filter_before(&self) -> Option<u64> {
+        match &self.command {
+            LimeSubCommand::Extract { before, .. } => *before,
+            _ => None,
         }
     }
 }
