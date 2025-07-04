@@ -4,6 +4,15 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.1] - 2025-07-XX
+
+### Added
+
+- `extract` command: Added two flags `--after` and `--before` to limit offline extraction to sub-intervals of the entire trace.
+  - `--after TIME` — skip all events with timestamps earlier than `TIME`
+  - `--before TIME` — skip all events with timestamps later than `TIME`
+  - In both cases, `TIME` is a [`CLOCK_BOOTTIME`](https://linux.die.net/man/2/clock_gettime) timestamp, i.e., a timestamp relative to when the system started up, which is the clock source used by LiME's eBPF probes.
+
 ## [0.2.0] - 2025-06-03
 
 ### Added
