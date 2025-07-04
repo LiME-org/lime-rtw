@@ -13,6 +13,10 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
   - `--before TIME` — skip all events with timestamps later than `TIME`
   - In both cases, `TIME` is a [`CLOCK_BOOTTIME`](https://linux.die.net/man/2/clock_gettime) timestamp, i.e., a timestamp relative to when the system started up, which is the clock source used by LiME's eBPF probes.
 
+### Removed
+
+- Removed the `frequency`, `mean`, and `variance` fields from the JSON output of periodic models. These were leftovers from protyping work that are no more relevant in the current version.
+
 ## [0.2.0] - 2025-06-03
 
 ### Added

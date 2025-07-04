@@ -1295,12 +1295,8 @@ impl ArrivalModelExtractor for PeriodExtractor {
         if self.best_guess_candidate.period > 0 {
             return Some(ArrivalModel::Periodic(Periodic::Release {
                 period: self.best_guess_candidate.period as u64,
-                frequency: self.best_guess_candidate.frequency as f64,
                 offset: self.best_guess_candidate.offset as u64,
                 max_jitter: self.best_guess_candidate.max_jitter as u64,
-
-                mean: self.mean_inter_release.ceil() as u64,
-                variance: self.variance_inter_release.ceil() as u64,
             }));
         }
 
@@ -3471,10 +3467,7 @@ mod tests {
         assert_eq!(
             extractor.extract(),
             Some(ArrivalModel::Periodic(Periodic::Release {
-                mean: 11,
-                variance: 1,
                 period: 10,
-                frequency: 100000000.0,
                 offset: 100,
                 max_jitter: 3,
             }))
@@ -3495,10 +3488,7 @@ mod tests {
         assert_eq!(
             extractor.extract(),
             Some(ArrivalModel::Periodic(Periodic::Release {
-                mean: 15,
-                variance: 0,
                 period: 15,
-                frequency: 66666666.0,
                 offset: 425,
                 max_jitter: 0,
             }))
@@ -3548,11 +3538,8 @@ mod tests {
             extractor.extract(),
             Some(ArrivalModel::Periodic(Periodic::Release {
                 period: 11,
-                frequency: 90909090.0,
                 offset: 70,
                 max_jitter: 31,
-                mean: 12,
-                variance: 4,
             }))
         );
     }
@@ -3689,11 +3676,8 @@ mod tests {
             extractor.extract(),
             Some(ArrivalModel::Periodic(Periodic::Release {
                 period: 2000000000,
-                frequency: 0.0,
                 offset: 1469590329226813,
                 max_jitter: 7008576676,
-                mean: 2071758645,
-                variance: 1304825994960172288,
             }))
         ); // Keep in mind it accounts for the estimates of the second batch
     }

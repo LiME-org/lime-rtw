@@ -42,16 +42,10 @@ pub enum Periodic {
     Release {
         /// Period of the best candidate.w
         period: u64,
-        /// Frequency of the best candidate
-        frequency: f64,
         /// Offset of the best candidate
         offset: u64,
         /// Max jitter of the best candidate
         max_jitter: u64,
-        /// Mean of all estimated periods, over all batches
-        mean: u64,
-        /// Variance of all estimated periods, over all batches
-        variance: u64,
     },
     /// Periodic model extracted from arrival times
     Arrival {
