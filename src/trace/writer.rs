@@ -35,7 +35,7 @@ impl FromStr for EventsFileFormat {
         } else if s.eq_ignore_ascii_case("protobuf") {
             Ok(EventsFileFormat::Protobuf)
         } else {
-            Err(format!("Unknown format: {}", s))
+            Err(format!("Unknown format: {s}"))
         }
     }
 }

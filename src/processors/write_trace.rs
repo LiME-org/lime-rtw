@@ -53,7 +53,7 @@ impl TraceWriter {
             if let Some(tinfo) = src.get_task_info(*task_id) {
                 let f = self.output_dir.create_infos_file(task_id).unwrap();
 
-                let filename = format!("{}.infos.json", task_id);
+                let filename = format!("{task_id}.infos.json");
                 self.written_files.insert(filename);
 
                 serde_json::to_writer_pretty(f, &tinfo).unwrap();

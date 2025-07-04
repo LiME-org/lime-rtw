@@ -203,40 +203,40 @@ impl Display for JobSeparator {
         let s = match self {
             // TODO handle abs_time field
             JobSeparator::ClockNanosleep { clock_id, .. } => {
-                format!("clock_nanosleep @{:?}", clock_id)
+                format!("clock_nanosleep @{clock_id:?}")
             }
-            JobSeparator::Select { inp } => format!("select @:{:x}", inp),
-            JobSeparator::Poll { pfds } => format!("poll @:{:x}", pfds),
-            JobSeparator::ReadSock { fd } => format!("read_sock fd:{}", fd),
-            JobSeparator::ReadFifo { fd } => format!("read_fifo fd:{}", fd),
-            JobSeparator::ReadBlk { fd } => format!("read_blk fd:{}", fd),
-            JobSeparator::ReadChr { fd } => format!("read_chr fd:{}", fd),
-            JobSeparator::Accept { sock_fd } => format!("accept fd:{}", sock_fd),
+            JobSeparator::Select { inp } => format!("select @:{inp:x}"),
+            JobSeparator::Poll { pfds } => format!("poll @:{pfds:x}"),
+            JobSeparator::ReadSock { fd } => format!("read_sock fd:{fd}"),
+            JobSeparator::ReadFifo { fd } => format!("read_fifo fd:{fd}"),
+            JobSeparator::ReadBlk { fd } => format!("read_blk fd:{fd}"),
+            JobSeparator::ReadChr { fd } => format!("read_chr fd:{fd}"),
+            JobSeparator::Accept { sock_fd } => format!("accept fd:{sock_fd}"),
             JobSeparator::FutexWait { uaddr, clock_id } => {
-                format!("futex_wait @:{:x} on {:?}", uaddr, clock_id)
+                format!("futex_wait @:{uaddr:x} on {clock_id:?}")
             }
             JobSeparator::FutexWaitBitSet { uaddr, clock_id } => {
-                format!("futex_wait_bitset @:{:x} on {:?}", uaddr, clock_id)
+                format!("futex_wait_bitset @:{uaddr:x} on {clock_id:?}")
             }
             JobSeparator::SigTimedWait => "sigtimedwait".to_string(),
             JobSeparator::Suspension => "suspension".to_string(),
-            JobSeparator::EpollPwait { epfd } => format!("epoll_pwait fd:{}", epfd),
-            JobSeparator::PSelect6 { inp } => format!("pselect6 @:{:x}", inp),
+            JobSeparator::EpollPwait { epfd } => format!("epoll_pwait fd:{epfd}"),
+            JobSeparator::PSelect6 { inp } => format!("pselect6 @:{inp:x}"),
             JobSeparator::YieldSchedDeadline => "yield_sched_deadline".to_string(),
             JobSeparator::Nanosleep {} => "nanosleep".to_string(),
             JobSeparator::Pause => "pause".to_string(),
             JobSeparator::RtSigsuspend => "rt_sigsuspend".to_string(),
-            JobSeparator::MqTimedReceive { mqd } => format!("mq_timed_receive mqd:{}", mqd),
-            JobSeparator::Recv { sock_fd } => format!("recv sock_fd:{}", sock_fd),
-            JobSeparator::Recvfrom { sock_fd } => format!("recvfrom sock_fd:{}", sock_fd),
-            JobSeparator::Recvmsg { sock_fd } => format!("recvmsg sock_fd:{}", sock_fd),
-            JobSeparator::Recvmmsg { sock_fd } => format!("recvmmsg sock_fd:{}", sock_fd),
-            JobSeparator::Msgrcv { msqid } => format!("recv msqid:{}", msqid),
+            JobSeparator::MqTimedReceive { mqd } => format!("mq_timed_receive mqd:{mqd}"),
+            JobSeparator::Recv { sock_fd } => format!("recv sock_fd:{sock_fd}"),
+            JobSeparator::Recvfrom { sock_fd } => format!("recvfrom sock_fd:{sock_fd}"),
+            JobSeparator::Recvmsg { sock_fd } => format!("recvmsg sock_fd:{sock_fd}"),
+            JobSeparator::Recvmmsg { sock_fd } => format!("recvmmsg sock_fd:{sock_fd}"),
+            JobSeparator::Msgrcv { msqid } => format!("recv msqid:{msqid}"),
             JobSeparator::Semop { sem_id, timeout } => {
-                format!("semop semid:{} timeout:{}", sem_id, timeout)
+                format!("semop semid:{sem_id} timeout:{timeout}")
             }
         };
 
-        write!(f, "{}", s)
+        write!(f, "{s}")
     }
 }

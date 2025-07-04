@@ -48,7 +48,7 @@ impl StatsView {
             .comm
             .clone()
             .unwrap_or_else(|| String::from("-"));
-        let title = format!("Models for {} ({})", comm, task_id);
+        let title = format!("Models for {comm} ({task_id})");
 
         if let Some(models) = &process.models {
             let chunks = Layout::default()
@@ -94,7 +94,7 @@ impl StatsView {
                         Span::styled(separator.clone(), style),
                         Span::raw(" "),
                         Span::styled(
-                            format!("[{} occurrences]", count),
+                            format!("[{count} occurrences]"),
                             Style::default().fg(Color::Yellow),
                         ),
                     ];
@@ -132,7 +132,7 @@ impl StatsView {
                     let model_text = self.format_model_info(separator_name, model_info);
 
                     let details_block = Block::default()
-                        .title(format!("Details for '{}'", separator_name))
+                        .title(format!("Details for '{separator_name}'"))
                         .borders(Borders::NONE);
 
                     let details = Paragraph::new(model_text)
@@ -280,7 +280,7 @@ impl StatsView {
                         Span::styled(separator.clone(), style),
                         Span::raw(" "),
                         Span::styled(
-                            format!("[{} occurrences]", count),
+                            format!("[{count} occurrences]"),
                             Style::default().fg(Color::Yellow),
                         ),
                     ];
@@ -327,7 +327,7 @@ impl StatsView {
             if let Some((separator_name, model_text)) = details_content {
                 let final_details_block = details_block.unwrap_or_else(|| {
                     Block::default()
-                        .title(format!("Details for '{}'", separator_name))
+                        .title(format!("Details for '{separator_name}'"))
                         .borders(Borders::ALL)
                 });
 
@@ -403,14 +403,14 @@ impl StatsView {
                                         ""
                                     };
 
-                                    sep_details = format!("({}{})", clock_id, abs_str);
+                                    sep_details = format!("({clock_id}{abs_str})");
                                 }
                             }
 
                             let separator_name = if sep_details.is_empty() {
                                 sep_type.to_string()
                             } else {
-                                format!("{} {}", sep_type, sep_details)
+                                format!("{sep_type} {sep_details}")
                             };
 
                             let mut model_info = ModelInfo {
@@ -527,14 +527,14 @@ impl StatsView {
                                         ""
                                     };
 
-                                    sep_details = format!("({}{})", clock_id, abs_str);
+                                    sep_details = format!("({clock_id}{abs_str})");
                                 }
                             }
 
                             let name = if sep_details.is_empty() {
                                 sep_type.to_string()
                             } else {
-                                format!("{} {}", sep_type, sep_details)
+                                format!("{sep_type} {sep_details}")
                             };
 
                             if name == separator_name {
@@ -574,11 +574,11 @@ impl StatsView {
     fn format_model_info(&self, separator_name: &str, model_info: &ModelInfo) -> String {
         let mut details = Vec::new();
 
-        details.push(format!("Separator: {}", separator_name));
+        details.push(format!("Separator: {separator_name}"));
         details.push(String::new());
 
         if let Some(count) = model_info.count {
-            details.push(format!("Count: {}", count));
+            details.push(format!("Count: {count}"));
             details.push(String::new());
         }
 
@@ -601,21 +601,21 @@ impl StatsView {
                     match model_type {
                         "periodic" => {
                             if let Some(period) = model.get("period").and_then(|p| p.as_u64()) {
-                                details.push(format!("  Period: {} ns", period));
+                                details.push(format!("  Period: {period} ns"));
                             }
                             if let Some(jitter) = model.get("max_jitter").and_then(|j| j.as_u64()) {
-                                details.push(format!("  Jitter: {} ns", jitter));
+                                details.push(format!("  Jitter: {jitter} ns"));
                             }
                             if let Some(offset) = model.get("offset").and_then(|o| o.as_u64()) {
-                                details.push(format!("  Offset: {} ns", offset));
+                                details.push(format!("  Offset: {offset} ns"));
                             }
                             if let Some(on) = model.get("on").and_then(|o| o.as_str()) {
-                                details.push(format!("  On: {}", on));
+                                details.push(format!("  On: {on}"));
                             }
                         }
                         "sporadic" => {
                             if let Some(mit) = model.get("mit").and_then(|m| m.as_u64()) {
-                                details.push(format!("  Minimum Inter-arrival Time: {} ns", mit));
+                                details.push(format!("  Minimum Inter-arrival Time: {mit} ns"));
                             }
                         }
                         "arrival_curve" => {
@@ -624,7 +624,7 @@ impl StatsView {
                                 .and_then(|d| d.as_array())
                                 .map_or(0, |arr| arr.len());
                             details
-                                .push(format!("  Points: {} (see tables for details)", dmin_count));
+                                .push(format!("  Points: {dmin_count} (see tables for details)"));
                         }
                         _ => {
                             if let Some(obj) = model.as_object() {
@@ -648,7 +648,7 @@ impl StatsView {
                                             Value::Array(_) => "[array]".to_string(),
                                             Value::Object(_) => "{object}".to_string(),
                                         };
-                                        details.push(format!("  {}: {}", k, value_str));
+                                        details.push(format!("  {k}: {value_str}"));
                                     }
                                 }
                             }
@@ -664,15 +664,15 @@ impl StatsView {
                 .and_then(|v| v.as_u64())
                 .filter(|&val| val > 0)
             {
-                details.push(format!("Dynamic Self-Suspension: {} ns", dss));
+                details.push(format!("Dynamic Self-Suspension: {dss} ns"));
                 details.push(String::new());
             }
         } else if let Some(period) = model_info.period {
             details.push(String::from("Periodic Model:"));
-            details.push(format!("  Period: {} ns", period));
+            details.push(format!("  Period: {period} ns"));
 
             if let Some(jitter) = model_info.jitter {
-                details.push(format!("  Jitter: {} ns", jitter));
+                details.push(format!("  Jitter: {jitter} ns"));
             }
 
             details.push(String::new());
@@ -715,10 +715,7 @@ impl StatsView {
                     let model_info = &separator_data[separator_name];
 
                     let block = Block::default()
-                        .title(format!(
-                            "Detailed View: {} (Scroll: Up/Down)",
-                            separator_name
-                        ))
+                        .title(format!("Detailed View: {separator_name} (Scroll: Up/Down)"))
                         .borders(Borders::ALL);
 
                     let inner_area = block.inner(area);
@@ -776,16 +773,16 @@ impl StatsView {
         let mut summary_text = Vec::new();
 
         let count_str = if let Some(count) = model_info.count {
-            format!("Count: {}", count)
+            format!("Count: {count}")
         } else {
             String::from("Count: Unknown")
         };
 
         let period_str = if let Some(period) = model_info.period {
             if let Some(jitter) = model_info.jitter {
-                format!("Period: {} ns, Jitter: {} ns", period, jitter)
+                format!("Period: {period} ns, Jitter: {jitter} ns")
             } else {
-                format!("Period: {} ns", period)
+                format!("Period: {period} ns")
             }
         } else {
             String::from("No periodic model")
@@ -846,7 +843,7 @@ impl StatsView {
                         }
 
                         detail_lines.push(Line::from(vec![Span::styled(
-                            format!("► {}", model_type),
+                            format!("► {model_type}"),
                             Style::default()
                                 .fg(Color::Green)
                                 .add_modifier(Modifier::BOLD),
@@ -861,7 +858,7 @@ impl StatsView {
                                         Span::raw("  "),
                                         Span::styled("Period:", Style::default().fg(Color::Blue)),
                                         Span::raw(" "),
-                                        Span::styled(format!("{} ns", p), Style::default()),
+                                        Span::styled(format!("{p} ns"), Style::default()),
                                     ]));
                                 }
 
@@ -875,7 +872,7 @@ impl StatsView {
                                         Span::raw("  "),
                                         Span::styled("Jitter:", Style::default().fg(Color::Blue)),
                                         Span::raw(" "),
-                                        Span::styled(format!("{} ns", j), Style::default()),
+                                        Span::styled(format!("{j} ns"), Style::default()),
                                     ]));
                                 }
 
@@ -884,7 +881,7 @@ impl StatsView {
                                         Span::raw("  "),
                                         Span::styled("Offset:", Style::default().fg(Color::Blue)),
                                         Span::raw(" "),
-                                        Span::styled(format!("{} ns", offset), Style::default()),
+                                        Span::styled(format!("{offset} ns"), Style::default()),
                                     ]));
                                 }
 
@@ -906,7 +903,7 @@ impl StatsView {
                                             Style::default().fg(Color::Blue),
                                         ),
                                         Span::raw(" "),
-                                        Span::styled(format!("{} ns", mit), Style::default()),
+                                        Span::styled(format!("{mit} ns"), Style::default()),
                                     ]));
                                 }
                             }
@@ -944,7 +941,7 @@ impl StatsView {
                     Span::raw("  "),
                     Span::styled("Dynamic Self-Suspension:", Style::default().fg(Color::Blue)),
                     Span::raw(" "),
-                    Span::styled(format!("{} ns", dss), Style::default()),
+                    Span::styled(format!("{dss} ns"), Style::default()),
                 ]));
                 detail_lines.push(Line::from(""));
             }
@@ -996,12 +993,12 @@ impl StatsView {
                                             ),
                                             Span::raw("Suspension: "),
                                             Span::styled(
-                                                format!("{} ns", suspension_time),
+                                                format!("{suspension_time} ns"),
                                                 Style::default().fg(Color::Red),
                                             ),
                                             Span::raw(", Execution: "),
                                             Span::styled(
-                                                format!("{} ns", execution_time),
+                                                format!("{execution_time} ns"),
                                                 Style::default().fg(Color::Green),
                                             ),
                                         ]));
@@ -1119,7 +1116,7 @@ impl StatsView {
                         self.add_wcet_table_header(
                             wcet_table_lines,
                             width,
-                            &format!("WCET_n Table ({})", model_type),
+                            &format!("WCET_n Table ({model_type})"),
                         );
                         self.add_wcet_table_content(wcet_table_lines, wcets, width);
                         break;
@@ -1170,7 +1167,7 @@ impl StatsView {
                 Span::raw("  "),
                 Span::styled(format!("{:3}", idx + 1), Style::default().fg(Color::Yellow)),
                 Span::raw(" | "),
-                Span::styled(format!("{:10}", wcet), Style::default().fg(Color::Blue)),
+                Span::styled(format!("{wcet:10}"), Style::default().fg(Color::Blue)),
             ]));
         }
     }

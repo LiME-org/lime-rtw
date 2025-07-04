@@ -178,7 +178,7 @@ impl ProcessList {
         let rows = self.process_ids.iter().map(|id| {
             let process = processes.get(id).unwrap();
 
-            let task_id_str = format!("{}", id);
+            let task_id_str = format!("{id}");
             let policy_str = match process.info.policy {
                 SchedulingPolicy::Other => "CFS".to_string(),
                 SchedulingPolicy::Fifo { .. } => "FIFO".to_string(),
@@ -187,13 +187,13 @@ impl ProcessList {
                     runtime,
                     period,
                     deadline,
-                } => format!("DL {}/{}/{}", runtime, period, deadline),
+                } => format!("DL {runtime}/{period}/{deadline}"),
                 SchedulingPolicy::Unknown => "?".to_string(),
             };
 
             let prio_str = match process.info.policy {
-                SchedulingPolicy::Fifo { prio } => format!("{}", prio),
-                SchedulingPolicy::RoundRobin { prio } => format!("{}", prio),
+                SchedulingPolicy::Fifo { prio } => format!("{prio}"),
+                SchedulingPolicy::RoundRobin { prio } => format!("{prio}"),
                 _ => "-".to_string(),
             };
 

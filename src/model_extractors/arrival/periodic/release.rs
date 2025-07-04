@@ -628,7 +628,7 @@ impl PeriodExtractor {
             );
             (new_offset, new_max_jitter, new_total_jitter)
         } else {
-            panic!("Candidate does not exist for period {}", period);
+            panic!("Candidate does not exist for period {period}");
         }
     }
 
@@ -651,7 +651,7 @@ impl PeriodExtractor {
             );
             (new_offset, new_max_jitter, new_total_jitter)
         } else {
-            panic!("Candidate does not exist for period {}", period);
+            panic!("Candidate does not exist for period {period}");
         }
     }
 
@@ -858,7 +858,7 @@ impl PeriodExtractor {
 
     #[allow(unused)]
     pub fn pretty_print_candidates(&self, descriptor: &str) {
-        println!("Printing all {} candidates:", descriptor);
+        println!("Printing all {descriptor} candidates:");
         println!("---------------------------------");
         for (period, data) in &self.rounded_period_candidates {
             println!(

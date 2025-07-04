@@ -46,7 +46,7 @@ impl JobSummary {
 
 fn open_job_summary_file(base: &str, task_id: &TaskId) -> Result<File> {
     let mut b = PathBuf::from(base);
-    let filename = format!("{}.jobs.json", task_id);
+    let filename = format!("{task_id}.jobs.json");
 
     b.push(filename);
 

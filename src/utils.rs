@@ -184,7 +184,7 @@ pub fn unique_json_filename<P: AsRef<Path>>(path: Option<P>) -> Option<PathBuf> 
     let date_format = format_description!("[year]_[month]_[day]_[hour][minute][second]");
     let formatted_date = now.format(&date_format).unwrap();
 
-    let name = format!("lime_{}.json", formatted_date);
+    let name = format!("lime_{formatted_date}.json");
 
     let p = path
         .as_ref()
@@ -196,7 +196,7 @@ pub fn unique_json_filename<P: AsRef<Path>>(path: Option<P>) -> Option<PathBuf> 
     }
 
     for c in 'a'..='z' {
-        let name = format!("lime_{}_{}.json", formatted_date, c);
+        let name = format!("lime_{formatted_date}_{c}.json");
         let p = path
             .as_ref()
             .map(|p| p.as_ref().join(&name))

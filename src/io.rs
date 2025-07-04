@@ -25,7 +25,7 @@ fn make_unique_result_dir_path<P: AsRef<Path>>(path: Option<P>) -> Option<PathBu
     let date_format = format_description!("[year]-[month]-[day]-[hour][minute][second]");
     let formatted_date = now.format(&date_format).unwrap();
 
-    let name = format!("lime-{}", formatted_date);
+    let name = format!("lime-{formatted_date}");
 
     let p = path
         .as_ref()
@@ -37,7 +37,7 @@ fn make_unique_result_dir_path<P: AsRef<Path>>(path: Option<P>) -> Option<PathBu
     }
 
     for c in 'a'..='z' {
-        let name = format!("lime-{}-{}", formatted_date, c);
+        let name = format!("lime-{formatted_date}-{c}");
         let p = path
             .as_ref()
             .map(|p| p.as_ref().join(&name))
@@ -67,16 +67,16 @@ impl Display for LimeFile {
                     EventsFileFormat::Json => "json",
                     EventsFileFormat::Protobuf => "pb",
                 };
-                write!(f, "{}.events.{}", t, ext)
+                write!(f, "{t}.events.{ext}")
             }
             LimeFile::Infos(t) => {
-                write!(f, "{}.infos.json", t)
+                write!(f, "{t}.infos.json")
             }
             LimeFile::Models(t) => {
-                write!(f, "{}.models.json", t)
+                write!(f, "{t}.models.json")
             }
             LimeFile::Jobs(t) => {
-                write!(f, "{}.jobs.json", t)
+                write!(f, "{t}.jobs.json")
             }
         }
     }
@@ -197,7 +197,7 @@ impl LimeOutputDirectory {
 
     fn lime_file_path(&self, f: &LimeFile) -> PathBuf {
         let ret = PathBuf::from(self.path.as_str());
-        let filename = format!("{}", f);
+        let filename = format!("{f}");
 
         ret.join(filename)
     }

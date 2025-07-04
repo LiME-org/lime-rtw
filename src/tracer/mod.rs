@@ -428,7 +428,7 @@ impl BPFTracer<'_> {
             if !failed.is_empty() && verbose {
                 eprint!("\nLiME: note: failed to attach ");
                 for p in failed.iter() {
-                    eprint!(" {}", p)
+                    eprint!(" {p}")
                 }
                 eprintln!()
             }

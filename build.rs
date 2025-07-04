@@ -15,7 +15,7 @@ mod build {
             .source(SRC)
             .build_and_generate(&out)
             .unwrap();
-        println!("cargo:rerun-if-changed={}", SRC);
+        println!("cargo:rerun-if-changed={SRC}");
     }
 }
 
