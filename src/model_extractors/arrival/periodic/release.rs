@@ -717,7 +717,7 @@ impl PeriodExtractor {
     fn get_lower_and_higher_candidates(
         &self,
         estimated_period: i64,
-    ) -> (PeriodicCandidate, PeriodicCandidate) {
+    ) -> (PeriodicCandidate<'_>, PeriodicCandidate<'_>) {
         let lower_period_candidate = self
             .least_jitter_candidates
             .range(..estimated_period)
@@ -1065,7 +1065,7 @@ impl PeriodExtractor {
         sorted_data.sort_by(|a, b| a.partial_cmp(b).unwrap());
         let len = sorted_data.len();
 
-        if len % 2 == 0 {
+        if len.is_multiple_of(2) {
             (sorted_data[len / 2 - 1] + sorted_data[len / 2]) / 2.0
         } else {
             sorted_data[len / 2]

@@ -27,7 +27,9 @@ impl TaskModelExtractor {
         }
     }
 
-    pub fn thread_extractor(&self) -> impl Iterator<Item = (&TaskId, &ThreadTaskModelExtractor)> {
+    pub fn thread_extractor(
+        &self,
+    ) -> impl Iterator<Item = (&TaskId, &ThreadTaskModelExtractor<'_>)> {
         self.extractors.items()
     }
 
