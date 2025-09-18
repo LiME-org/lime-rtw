@@ -4,6 +4,13 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.2.2] - 2025-09-22
+
+### Added
+
+- Store the first and last event times of each task in both ISO8601 format and as a `CLOCK_BOOTTIME` timestamp within `*.info.json`.
+- Store the LiME start time, along with the system’s scheduling configuration, the Linux kernel version, the LiME version, and the arguments used to invoke `lime-rtw`, in a new per-trace file `sysinfo.json`.
+
 ## [0.2.1] - 2025-07-22
 
 ### Added
