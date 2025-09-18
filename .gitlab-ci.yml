@@ -23,8 +23,7 @@ image: "rust:latest"
 # You will often need this when you (or any of your dependencies) depends on C code.
 before_script:
    - apt-get update -yqq
-   - apt-get install -yqq --no-install-recommends build-essential clang-13 libelf-dev zlib1g-dev pkg-config libbpf-dev protobuf-compiler
-   - ln -s /usr/bin/clang-13 /usr/bin/clang
+   - apt-get install -yqq --no-install-recommends build-essential clang libelf-dev zlib1g-dev pkg-config libbpf-dev protobuf-compiler
 
 # Use cargo to test the project
 test:cargo:
