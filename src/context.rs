@@ -15,9 +15,13 @@
 
 use std::time::Duration;
 
-use crate::cli::CLI;
+use crate::cli::{EventSourceType, CLI};
 use crate::io::LimeOutputDirectory;
+use crate::task::TimeReference;
 use crate::trace::writer::EventsFileFormat;
+
+#[cfg(target_os = "linux")]
+use nix::time::{clock_gettime, ClockId};
 
 /// Contains all LiME paramaters
 pub struct LimeContext {
@@ -74,6 +78,12 @@ pub struct LimeContext {
     pub tx_batch_size: usize,
 
     pub output_format: EventsFileFormat,
+
+    pub event_source_type: EventSourceType,
+
+    pub command_args: Vec<String>,
+
+    pub time_reference: Option<TimeReference>,
 }
 
 impl LimeContext {
@@ -105,6 +115,25 @@ impl LimeContext {
 
 impl From<&CLI> for LimeContext {
     fn from(cli_opts: &CLI) -> Self {
+        let command_args = std::env::args().collect();
+
+        #[cfg(target_os = "linux")]
+        let is_bpf_tracer = matches!(cli_opts.event_source_type(), EventSourceType::BPFTracer);
+        #[cfg(not(target_os = "linux"))]
+        let is_bpf_tracer = false;
+
+        let time_reference = if is_bpf_tracer {
+            match create_time_reference() {
+                Ok(time_ref) => Some(time_ref),
+                Err(e) => {
+                    eprintln!("Warning: Failed to create time reference: {}", e);
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         Self {
             wcet_n_max_len: cli_opts.wcet_n_max_len().unwrap_or_default(),
             arrival_curve_max_len: cli_opts.arrival_curve_max_len().unwrap_or_default(),
@@ -129,6 +158,32 @@ impl From<&CLI> for LimeContext {
             output_format: cli_opts.output_format(),
             time_filter_after: cli_opts.time_filter_after(),
             time_filter_before: cli_opts.time_filter_before(),
+            event_source_type: cli_opts.event_source_type(),
+            command_args,
+            time_reference,
         }
     }
+}
+
+fn create_time_reference() -> Result<TimeReference, String> {
+    use time::OffsetDateTime;
+
+    let start_time = OffsetDateTime::now_utc()
+        .format(&time::format_description::well_known::Iso8601::DEFAULT)
+        .map_err(|e| format!("Failed to format start time: {}", e))?;
+
+    let boottime_ns = {
+        #[cfg(target_os = "linux")]
+        {
+            let timespec = clock_gettime(ClockId::CLOCK_BOOTTIME)
+                .map_err(|e| format!("Failed to get boottime: {}", e))?;
+            (timespec.tv_sec() as u64) * 1_000_000_000 + (timespec.tv_nsec() as u64)
+        }
+        #[cfg(not(target_os = "linux"))]
+        {
+            0
+        }
+    };
+
+    Ok(TimeReference::new(start_time, boottime_ns))
 }

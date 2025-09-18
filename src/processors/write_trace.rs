@@ -9,6 +9,9 @@ use crate::{
     EventProcessor, EventSource,
 };
 
+#[cfg(target_os = "linux")]
+use crate::cli::EventSourceType;
+
 use anyhow::{Ok, Result};
 use std::collections::HashSet;
 
@@ -95,8 +98,23 @@ impl TryFrom<&LimeContext> for TraceWriter {
 }
 
 impl EventProcessor for TraceWriter {
-    fn pre_load_init(&mut self, _ctx: &LimeContext) -> Result<()> {
+    fn pre_load_init(&mut self, ctx: &LimeContext) -> Result<()> {
         self.output_dir.create_dir()?;
+
+        #[cfg(target_os = "linux")]
+        let is_bpf_tracer = matches!(ctx.event_source_type, EventSourceType::BPFTracer);
+        #[cfg(not(target_os = "linux"))]
+        let is_bpf_tracer = false;
+
+        if is_bpf_tracer {
+            if let Err(e) = self.output_dir.write_system_info(
+                "trace",
+                &ctx.command_args,
+                ctx.time_reference.as_ref().unwrap(),
+            ) {
+                eprintln!("Warning: Failed to write system info: {}", e);
+            }
+        }
 
         Ok(())
     }

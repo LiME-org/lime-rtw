@@ -164,7 +164,7 @@ impl TracedCmd {
         sset.add(sys::signal::Signal::SIGUSR1);
         sset.thread_block()?;
 
-        match fork()? {
+        match unsafe { fork()? } {
             ForkResult::Child => {
                 sset.wait()?;
                 sset.thread_unblock()?;

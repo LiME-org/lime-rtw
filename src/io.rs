@@ -17,7 +17,11 @@ use glob::Paths;
 use time::{macros::format_description, OffsetDateTime};
 
 use crate::trace::writer::EventsFileFormat;
-use crate::{cli::CLI, task::TaskId};
+use crate::{
+    cli::CLI,
+    sysinfo::SystemInfo,
+    task::{TaskId, TimeReference},
+};
 
 fn make_unique_result_dir_path<P: AsRef<Path>>(path: Option<P>) -> Option<PathBuf> {
     let now = OffsetDateTime::now_local().unwrap();
@@ -275,6 +279,19 @@ impl LimeOutputDirectory {
 
     pub fn get_events_file_path(&self, task_id: &TaskId, format: EventsFileFormat) -> PathBuf {
         PathBuf::from(&self.path).join(LimeFile::Events(*task_id, format).to_string())
+    }
+
+    pub fn write_system_info(
+        &self,
+        command: &str,
+        args: &[String],
+        time_ref: &TimeReference,
+    ) -> Result<()> {
+        let info = SystemInfo::collect(command, args, time_ref)?;
+        let info_path = PathBuf::from(&self.path).join("sysinfo.json");
+        let file = File::create(info_path)?;
+        serde_json::to_writer_pretty(file, &info)?;
+        Ok(())
     }
 }
 

@@ -12,6 +12,9 @@ use crate::{
     EventProcessor, EventSource,
 };
 
+#[cfg(target_os = "linux")]
+use crate::cli::EventSourceType;
+
 use anyhow::Result;
 
 pub struct TaskModelExtractor {
@@ -86,8 +89,23 @@ impl From<&LimeContext> for TaskModelExtractor {
 }
 
 impl EventProcessor for TaskModelExtractor {
-    fn pre_load_init(&mut self, _ctx: &LimeContext) -> anyhow::Result<()> {
+    fn pre_load_init(&mut self, ctx: &LimeContext) -> anyhow::Result<()> {
         self.output_directory.create_dir()?;
+
+        #[cfg(target_os = "linux")]
+        let is_bpf_tracer = matches!(ctx.event_source_type, EventSourceType::BPFTracer);
+        #[cfg(not(target_os = "linux"))]
+        let is_bpf_tracer = false;
+
+        if is_bpf_tracer {
+            if let Err(e) = self.output_directory.write_system_info(
+                "extract",
+                &ctx.command_args,
+                ctx.time_reference.as_ref().unwrap(),
+            ) {
+                eprintln!("Warning: Failed to write system info: {}", e);
+            }
+        }
 
         Ok(())
     }

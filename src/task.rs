@@ -9,8 +9,64 @@ use nom::{
     IResult,
 };
 use serde::{Deserialize, Serialize};
+use time::format_description::well_known::Iso8601;
+use time::{Duration, OffsetDateTime};
 
 use crate::{events::SchedulingPolicy, utils::ThreadId};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EventTime {
+    pub boottime_ns: u64,
+    pub iso8601: String,
+}
+
+impl EventTime {
+    pub fn new(boottime_ns: u64, iso8601: String) -> Self {
+        Self {
+            boottime_ns,
+            iso8601,
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct TimeReference {
+    pub start_time_iso8601: String,
+    pub start_boottime_ns: u64,
+}
+
+impl TimeReference {
+    pub fn new(start_time_iso8601: String, start_boottime_ns: u64) -> Self {
+        Self {
+            start_time_iso8601,
+            start_boottime_ns,
+        }
+    }
+
+    pub fn boottime_to_iso8601(&self, event_boottime_ns: u64) -> Result<String, String> {
+        let start_dt = OffsetDateTime::parse(&self.start_time_iso8601, &Iso8601::DEFAULT)
+            .map_err(|e| format!("Failed to parse start time ISO8601: {}", e))?;
+
+        let delta_ns = event_boottime_ns.saturating_sub(self.start_boottime_ns);
+
+        let delta_seconds = delta_ns / 1_000_000_000;
+        let remaining_nanos = delta_ns % 1_000_000_000;
+
+        let duration =
+            Duration::seconds(delta_seconds as i64) + Duration::nanoseconds(remaining_nanos as i64);
+
+        let event_time = start_dt + duration;
+
+        event_time
+            .format(&Iso8601::DEFAULT)
+            .map_err(|e| format!("Failed to format as ISO8601: {}", e))
+    }
+
+    pub fn create_event_time(&self, event_boottime_ns: u64) -> Result<EventTime, String> {
+        let iso8601_time = self.boottime_to_iso8601(event_boottime_ns)?;
+        Ok(EventTime::new(event_boottime_ns, iso8601_time))
+    }
+}
 
 /// Task identifier
 #[derive(PartialEq, Eq, Hash, Copy, Clone, Debug)]
@@ -78,6 +134,8 @@ pub struct TaskInfos {
     pub cmd: Option<String>,
     pub policy: SchedulingPolicy,
     pub affinity_mask: Option<AffinityMask>,
+    pub first_event_time: Option<EventTime>,
+    pub last_event_time: Option<EventTime>,
 }
 
 #[derive(Debug, Default, Clone, Serialize, Deserialize)]
@@ -100,7 +158,7 @@ pub mod mapper {
         events::{EventData, SchedulingPolicy, TraceEvent},
     };
 
-    use super::{AffinityMask, TaskId, TaskInfos};
+    use super::{AffinityMask, TaskId, TaskInfos, TimeReference};
 
     use anyhow::Result;
 
@@ -171,13 +229,19 @@ pub mod mapper {
     }
     struct ThreadInfoSource {
         system: System,
+        time_reference: Option<TimeReference>,
     }
 
     impl ThreadInfoSource {
         pub fn new() -> Self {
             Self {
                 system: System::new(),
+                time_reference: None,
             }
+        }
+
+        pub fn set_time_reference(&mut self, time_reference: Option<TimeReference>) {
+            self.time_reference = time_reference;
         }
 
         fn sched_getattr(pid: u32) -> Result<SchedulingPolicy> {
@@ -246,6 +310,11 @@ pub mod mapper {
 
             let affinity_mask = self.get_affinity_mask(event.id.pid).ok();
 
+            let event_time = self
+                .time_reference
+                .as_ref()
+                .and_then(|time_ref| time_ref.create_event_time(event.ts).ok());
+
             TaskInfos {
                 id: event.id,
                 ppid,
@@ -253,6 +322,8 @@ pub mod mapper {
                 cmd,
                 policy,
                 affinity_mask,
+                first_event_time: event_time.clone(),
+                last_event_time: event_time,
             }
         }
 
@@ -298,6 +369,12 @@ pub mod mapper {
                 task_info.comm = p.map(Self::get_comm);
                 task_info.cmd = p.map(Self::get_cmd);
             }
+
+            if let Some(time_ref) = &self.time_reference {
+                if let Ok(event_time) = time_ref.create_event_time(event.ts) {
+                    task_info.last_event_time = Some(event_time);
+                }
+            }
         }
     }
 
@@ -341,6 +418,10 @@ pub mod mapper {
             }
             self.allow_task_affinity_change = ctx.allow_task_affinity_change;
             self.allow_task_priority_change = ctx.allow_task_priority_change;
+
+            self.task_infos
+                .builder
+                .set_time_reference(ctx.time_reference.clone());
         }
 
         fn new_mapping(&mut self, pid: u32) -> TaskId {
