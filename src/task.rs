@@ -6,7 +6,7 @@ use anyhow::{bail, Result};
 use nom::{
     branch::alt,
     bytes::complete::{tag, take_while1},
-    IResult,
+    IResult, Parser,
 };
 use serde::{Deserialize, Serialize};
 use time::format_description::well_known::Iso8601;
@@ -96,7 +96,7 @@ fn parse_taskid(input: &str) -> IResult<&str, TaskId> {
     let (i, _) = tag("-")(i)?;
     let (i, sversion) = take_while1(|c: char| c.is_ascii_digit())(i)?;
     let (i, _) = tag(".")(i)?;
-    let (i, _) = alt((tag("events"), tag("infos"), tag("models"), tag("jobs")))(i)?;
+    let (i, _) = alt((tag("events"), tag("infos"), tag("models"), tag("jobs"))).parse(i)?;
     let (i, _) = tag(".json")(i)?;
 
     let pid = spid.parse::<u32>().unwrap();
@@ -151,7 +151,7 @@ pub mod mapper {
     use libc::SCHED_OTHER;
     use nc::{sched_attr_t, SCHED_BATCH, SCHED_DEADLINE, SCHED_FIFO, SCHED_IDLE, SCHED_RR};
     use nix::sched::CpuSet;
-    use sysinfo::{PidExt, System, SystemExt};
+    use sysinfo::{Pid, Process, ProcessesToUpdate, System};
 
     use crate::{
         context::LimeContext,
@@ -162,7 +162,7 @@ pub mod mapper {
 
     use anyhow::Result;
 
-    type SysProcess = sysinfo::Process;
+    type SysProcess = Process;
 
     impl From<CpuSet> for AffinityMask {
         fn from(cpu_set: CpuSet) -> Self {
@@ -247,8 +247,7 @@ pub mod mapper {
         fn sched_getattr(pid: u32) -> Result<SchedulingPolicy> {
             unsafe {
                 let mut attrs = sched_attr_t::default();
-                let size = std::mem::size_of::<sched_attr_t>() as u32;
-                match nc::sched_getattr(pid as i32, &mut attrs, size, 0) {
+                match nc::sched_getattr(pid as i32, &mut attrs, 0) {
                     Ok(()) => {
                         let policy = SchedulingPolicy::from(&attrs);
 
@@ -259,21 +258,30 @@ pub mod mapper {
             }
         }
 
-        fn get_comm<P: sysinfo::ProcessExt>(process: &P) -> String {
-            process.name().to_string()
+        fn get_comm(process: &Process) -> String {
+            process.name().to_string_lossy().into_owned()
         }
 
-        fn get_cmd<P: sysinfo::ProcessExt>(process: &P) -> String {
-            process.cmd().join(" ")
+        fn get_cmd(process: &Process) -> String {
+            process
+                .cmd()
+                .iter()
+                .map(|s| s.to_string_lossy())
+                .collect::<Vec<_>>()
+                .join(" ")
         }
 
-        fn get_ppid<P: sysinfo::ProcessExt>(process: &P) -> Option<u32> {
+        fn get_ppid(process: &Process) -> Option<u32> {
             process.parent().map(|ppid| ppid.as_u32())
         }
 
         pub fn get_sys_process(&mut self, pid: u32) -> Option<&SysProcess> {
-            let sys_pid = sysinfo::Pid::from_u32(pid);
-            if self.system.refresh_process(sys_pid) {
+            let sys_pid = Pid::from_u32(pid);
+            let updated = self
+                .system
+                .refresh_processes(ProcessesToUpdate::Some(&[sys_pid]), true);
+
+            if updated > 0 {
                 return self.system.process(sys_pid);
             }
 

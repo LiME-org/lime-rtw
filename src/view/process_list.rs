@@ -1,5 +1,4 @@
 use tui::{
-    backend::Backend,
     layout::{Constraint, Rect},
     style::{Color, Modifier, Style},
     widgets::{Block, Borders, Cell, Row, Table, TableState},
@@ -108,12 +107,7 @@ impl ProcessList {
     }
 
     // Renders the process list table to the terminal
-    pub fn draw<B: Backend>(
-        &mut self,
-        f: &mut Frame<B>,
-        area: Rect,
-        custom_block: Option<Block<'_>>,
-    ) {
+    pub fn draw(&mut self, f: &mut Frame, area: Rect, custom_block: Option<Block<'_>>) {
         let processes = self.data.get_processes();
 
         let column_widths = [8, 12, 6, 16, 40];
@@ -231,12 +225,11 @@ impl ProcessList {
         let block =
             custom_block.unwrap_or_else(|| Block::default().title("Tasks").borders(Borders::ALL));
 
-        let table = Table::new(rows)
+        let table = Table::new(rows, visible_constraints.clone())
             .header(header)
             .block(block)
-            .highlight_style(Style::default().add_modifier(Modifier::REVERSED))
-            .highlight_symbol(">> ")
-            .widths(&visible_constraints);
+            .row_highlight_style(Style::default().add_modifier(Modifier::REVERSED))
+            .highlight_symbol(">> ");
 
         f.render_stateful_widget(table, area, &mut self.state);
     }

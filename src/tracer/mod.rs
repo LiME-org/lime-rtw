@@ -8,14 +8,17 @@ use crate::task::{mapper::TaskMapper, TaskId};
 use crate::utils::any_as_u8_slice_mut;
 use crate::{EventProcessor, EventSource};
 use anyhow::{Error, Result};
-use libbpf_rs::skel::{OpenSkel, SkelBuilder};
-use libbpf_rs::{MapFlags, MapHandle, RingBuffer, RingBufferBuilder};
+use libbpf_rs::skel::{OpenSkel, Skel, SkelBuilder};
+use libbpf_rs::{MapCore, MapFlags, MapHandle, RingBuffer, RingBufferBuilder};
 use nix::sys;
 use nix::sys::signal::Signal::{self, SIGCHLD};
 use plain::Plain;
+use std::convert::TryFrom;
+use std::error::Error as StdError;
 
 use crate::events::{EventData, SchedulingPolicy, TraceEvent};
 use std::collections::{HashMap, VecDeque};
+use std::mem::MaybeUninit;
 use std::sync::atomic::AtomicBool;
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -43,11 +46,11 @@ mod skel {
 }
 use skel::*;
 
-pub type RawEvent = lime_tracer_bss_types::lime_event;
-pub type EventType = lime_tracer_bss_types::event_type;
+pub type RawEvent = types::lime_event;
+pub type EventType = types::event_type;
 pub type BPFIter = libbpf_rs::Iter;
-pub type RawClockId = lime_tracer_bss_types::clock_id;
-pub type SiCode = lime_tracer_bss_types::si_code;
+pub type RawClockId = types::clock_id;
+pub type SiCode = types::si_code;
 
 unsafe impl Plain for RawEvent {}
 
@@ -300,40 +303,46 @@ impl BPFTracer<'_> {
 
         std::thread::spawn(move || {
             let skel_builder = LimeTracerSkelBuilder::default();
+            let mut obj = MaybeUninit::uninit();
+            let mut open_skel = skel_builder.open(&mut obj).map_err(Error::new)?;
 
-            let mut open_skel = skel_builder.open().map_err(Error::new)?;
+            if let Some(rodata) = open_skel.maps.rodata_data.as_mut() {
+                if !trace_all && (cmd_pid != 0) {
+                    rodata.target_tgid = cmd_pid;
+                }
 
-            if !trace_all && (cmd_pid != 0) {
-                open_skel.rodata().target_tgid = cmd_pid;
-            }
-
-            if trace_best_effort {
-                open_skel.rodata().sched_policy_mask = 0x47;
+                if trace_best_effort {
+                    rodata.sched_policy_mask = 0x47;
+                }
             }
 
             // Begin tracing
             let mut skel = open_skel.load().map_err(Error::new)?;
 
-            let mut attached = 0;
-            let mut links = vec![];
-            let mut failed = vec![];
-
+            let mut links: Vec<libbpf_rs::Link> = Vec::new();
+            let mut failed: Vec<String> = Vec::new();
+            let mut attached: usize = 0;
             let prev = libbpf_rs::set_print(None);
-
-            for prog in skel.obj.progs_iter_mut() {
+            for prog in skel.object_mut().progs_mut() {
+                let name = prog.name().to_string_lossy().into_owned();
                 match prog.attach() {
                     Ok(link) => {
                         links.push(link);
                         attached += 1;
                     }
-                    Err(_) => {
-                        failed.push(String::from(prog.name()));
+                    Err(_err) => {
+                        failed.push(name);
                     }
                 }
             }
             libbpf_rs::set_print(prev);
-
-            if verbose {
+            if attached == 0 {
+                return Err(Error::new(std::io::Error::new(
+                    std::io::ErrorKind::NotFound,
+                    "no eBPF programs attached",
+                )));
+            }
+            if verbose && !failed.is_empty() {
                 eprintln!(
                     "LiME: {} eBPF programs successfully attached ({} failed)",
                     attached,
@@ -351,18 +360,14 @@ impl BPFTracer<'_> {
                 }
             };
 
-            let m = skel.maps();
-            let throttled_map = m.throttled();
-            let throttled = MapHandle::try_clone(throttled_map)?;
+            let throttled = MapHandle::try_from(&skel.maps.throttled)?;
 
             let mut limiter = BPFSourceRateLimiter::new(limiter_period, limiter_budget, throttled);
             let _ = limiter.start();
 
-            let mut mm = skel.maps_mut();
-
             let mut builder = RingBufferBuilder::new();
             _ = builder
-                .add(mm.events(), move |d: &[u8]| {
+                .add(&skel.maps.events, move |d: &[u8]| {
                     let raw_event = Self::parse_raw_event(d);
                     let event = TraceEvent::from(&raw_event);
 
@@ -425,12 +430,12 @@ impl BPFTracer<'_> {
 
             // limiter.stop();
 
-            if !failed.is_empty() && verbose {
-                eprint!("\nLiME: note: failed to attach ");
+            if verbose && !failed.is_empty() {
+                eprint!("\nLiME: note: failed to attach");
                 for p in failed.iter() {
-                    eprint!(" {p}")
+                    eprint!(" {p}");
                 }
-                eprintln!()
+                eprintln!();
             }
 
             Ok(0)
@@ -509,12 +514,23 @@ impl BPFTracer<'_> {
         timeout: Duration,
         poll_interval: Duration,
     ) -> Result<(), Error> {
-        if let Err(libbpf_rs::Error::System(libc::EINTR)) = perf.poll(timeout) {
-            perf.poll(Duration::from_millis(0)).map_err(Error::new)
-        } else {
-            std::thread::sleep(poll_interval);
-            Ok(())
+        match perf.poll(timeout) {
+            Ok(_) => {}
+            Err(e) => {
+                let is_interrupted = e
+                    .source()
+                    .and_then(|s| s.downcast_ref::<std::io::Error>())
+                    .is_some_and(|ioe| ioe.kind() == std::io::ErrorKind::Interrupted);
+
+                if is_interrupted {
+                    perf.poll(Duration::from_millis(0)).map_err(Error::new)?;
+                } else {
+                    return Err(Error::new(e));
+                }
+            }
         }
+        std::thread::sleep(poll_interval);
+        Ok(())
     }
 
     pub fn join_children(&mut self) -> Result<i32> {
@@ -724,7 +740,7 @@ impl BPFSourceRateLimiter {
         let stop = Arc::clone(&self.stop);
         let limiter = Arc::clone(&self.limiter);
         let period = self.period;
-        let throttled_map = MapHandle::try_clone(&self.throttled_map)?;
+        let throttled_map = MapHandle::try_from(&self.throttled_map)?;
 
         self.refresher_handle = Some(std::thread::spawn(move || {
             while !stop.load(Ordering::Acquire) {

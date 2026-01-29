@@ -19,10 +19,10 @@ use std::time::Duration;
 use crate::trace::writer::EventsFileFormat;
 
 use clap::{Parser, Subcommand};
-use duration_str::DResult;
+use duration_str::{DError, DResult};
 
 fn parse_duration(s: &str) -> DResult<Duration> {
-    duration_str::parse(s)
+    duration_str::parse_std(s).map_err(DError::ParseError)
 }
 
 /// Parse timestamp from string. Supports:

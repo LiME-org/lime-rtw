@@ -14,7 +14,7 @@ impl Serialize for SiCode {
     where
         S: serde::Serializer,
     {
-        match self {
+        match *self {
             SiCode::SI_USER => serializer.serialize_unit_variant("", 0, "SI_USER"),
             SiCode::SI_KERNEL => serializer.serialize_unit_variant("", 1, "SI_KERNEL"),
             SiCode::SI_QUEUE => serializer.serialize_unit_variant("", 2, "SI_QUEUE"),
@@ -25,6 +25,7 @@ impl Serialize for SiCode {
             SiCode::SI_TKILL => serializer.serialize_unit_variant("", 7, "SI_TKILL"),
             SiCode::SI_DETHREAD => serializer.serialize_unit_variant("", 8, "SI_DETHREAD"),
             SiCode::SI_ASYNCNL => serializer.serialize_unit_variant("", 9, "SI_ASYNCNL"),
+            _ => serializer.serialize_i32(self.0),
         }
     }
 }
@@ -41,7 +42,7 @@ impl From<&RawEvent> for TraceEvent {
 
 impl From<RawClockId> for ClockId {
     fn from(variant: RawClockId) -> Self {
-        unsafe { std::mem::transmute(variant as i32) }
+        unsafe { std::mem::transmute(variant.0 as i32) }
     }
 }
 
@@ -80,7 +81,7 @@ impl From<&RawEvent> for EventData {
 
                 EventData::EnterClockNanoSleep {
                     clock_id: unsafe { ClockId::from(event.evd.clock_nanosleep.clock_id) },
-                    abs_time: unsafe { event.evd.clock_nanosleep.abs_time },
+                    abs_time: unsafe { event.evd.clock_nanosleep.abs_time.assume_init() },
                     required_ns,
                 }
             }
@@ -91,7 +92,7 @@ impl From<&RawEvent> for EventData {
                 EventData::EnterSelect {
                     inp: unsafe { event.evd.enter_select.inp },
                     timeout_usec,
-                    tvp_null: unsafe { event.evd.enter_select.tvp_null },
+                    tvp_null: unsafe { event.evd.enter_select.tvp_null.assume_init() },
                 }
             }
 
@@ -103,7 +104,7 @@ impl From<&RawEvent> for EventData {
                 EventData::EnterPselect6 {
                     inp: unsafe { event.evd.enter_select.inp },
                     timeout_nsec,
-                    tsp_null: unsafe { event.evd.enter_pselect6.tsp_null },
+                    tsp_null: unsafe { event.evd.enter_pselect6.tsp_null.assume_init() },
                 }
             }
 
@@ -188,7 +189,7 @@ impl From<&RawEvent> for EventData {
 
             EventType::DELIVER_RT_SIGNAL => EventData::RtSigDelivered {
                 signo: unsafe { event.evd.deliver_rt_sig.signo },
-                si_code: unsafe { event.evd.deliver_rt_sig.si_code as i32 },
+                si_code: unsafe { event.evd.deliver_rt_sig.si_code.0 },
             },
             EventType::ENTER_NANOSLEEP => {
                 let mut required_ns = 0;
@@ -297,6 +298,7 @@ impl From<&RawEvent> for EventData {
 
             EventType::SCHED_SCHEDULER_CHANGE => EventData::RawSchedulerChange,
             EventType::SCHED_SCHEDULER_CHANGE_FAILED => EventData::SchedulerChangeFailed,
+            _ => unreachable!("Unknown event type {}", event.ev_type.0),
         }
     }
 }

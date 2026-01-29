@@ -64,13 +64,16 @@ impl ViewProcessor {
     }
 
     // Main application loop that handles drawing and input
-    fn run_app<B: Backend>(&self, terminal: &mut Terminal<B>, mut app: AppState) -> Result<()> {
+    fn run_app<B: Backend>(&self, terminal: &mut Terminal<B>, mut app: AppState) -> Result<()>
+    where
+        B::Error: std::error::Error + Send + Sync + 'static,
+    {
         app.load_data()?;
 
         if let Some(process_list) = &app.process_list {
             if process_list.is_empty() {
                 terminal.draw(|f| {
-                    let size = f.size();
+                    let size = f.area();
                     let block = Block::default().title("No Tasks").borders(Borders::ALL);
                     let text = ["No tasks found to display.", "", "Press Enter to exit..."];
                     let paragraph = tui::widgets::Paragraph::new(text.join("\n"))

@@ -22,10 +22,13 @@ use crate::{
     job::Job,
 };
 
-use self::{dfa::Dfa, suspension::SelfSuspension, syscall::BlockingSyscall};
+use self::{
+    dfa::Dfa, sched_yield::SchedYieldDeadline, suspension::SelfSuspension, syscall::BlockingSyscall,
+};
 
 mod dfa;
 
+pub mod sched_yield;
 pub mod suspension;
 pub mod syscall;
 
@@ -71,6 +74,7 @@ pub trait Signature {
 pub struct SignatureMatcher {
     syscall: Dfa<BlockingSyscall>,
     suspension: Dfa<SelfSuspension>,
+    sched_yield: Dfa<SchedYieldDeadline>,
     in_progress: usize,
     buffer: Vec<TraceEvent>,
 }
@@ -80,6 +84,7 @@ impl SignatureMatcher {
         Self {
             syscall: Dfa::new(),
             suspension: Dfa::new(),
+            sched_yield: Dfa::new(),
             in_progress: 0,
             buffer: Vec::new(),
         }
@@ -90,6 +95,7 @@ impl SignatureMatcher {
         self.buffer.push(TraceEvent::start_of_trace());
         self.syscall.update_no_extract(&self.buffer[0], 0);
         self.suspension.update_no_extract(&self.buffer[0], 0);
+        self.sched_yield.update_no_extract(&self.buffer[0], 0);
     }
 
     fn update_matchers(&mut self, pos: usize, result: &mut Vec<(JobSeparator, JobSeparation)>) {
@@ -97,13 +103,16 @@ impl SignatureMatcher {
 
         self.syscall.update(&self.buffer, pos, result);
         self.suspension.update(&self.buffer, pos, result);
+        self.sched_yield.update(&self.buffer, pos, result);
     }
 
     /// Returns true if at least one signature matcher is in progress, i.e.,
     /// the underlying automaton is neither in the terminal state nor in the
     /// rejection state.
     pub fn ongoing_matching(&self) -> bool {
-        self.suspension.is_matching() || self.syscall.is_matching()
+        self.suspension.is_matching()
+            || self.syscall.is_matching()
+            || self.sched_yield.is_matching()
     }
 
     /// Consume an event and update the DFA state. Write succesfully extracted

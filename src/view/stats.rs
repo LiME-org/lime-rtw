@@ -1,7 +1,6 @@
 use serde_json::Value;
 use std::collections::HashMap;
 use tui::{
-    backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -35,9 +34,9 @@ impl StatsView {
     }
 
     // Renders the stats view in split mode (separators + details)
-    pub fn draw<B: Backend>(
+    pub fn draw(
         &mut self,
-        f: &mut Frame<B>,
+        f: &mut Frame,
         area: Rect,
         process: &ProcessInfo,
         custom_block: Option<Block<'_>>,
@@ -229,9 +228,9 @@ impl StatsView {
     }
 
     // Renders the stats view in split layout with separate areas for list and details
-    pub fn draw_split<B: Backend>(
+    pub fn draw_split(
         &mut self,
-        f: &mut Frame<B>,
+        f: &mut Frame,
         list_area: Rect,
         details_area: Rect,
         process: &ProcessInfo,
@@ -681,12 +680,7 @@ impl StatsView {
         details.join("\n")
     }
 
-    pub fn draw_detail_fullscreen<B: Backend>(
-        &mut self,
-        f: &mut Frame<B>,
-        area: Rect,
-        process: &ProcessInfo,
-    ) {
+    pub fn draw_detail_fullscreen(&mut self, f: &mut Frame, area: Rect, process: &ProcessInfo) {
         if let Some(models) = &process.models {
             let separator_data = self.extract_separator_data(models);
 
@@ -763,9 +757,9 @@ impl StatsView {
         }
     }
 
-    fn render_separator_summary<B: Backend>(
+    fn render_separator_summary(
         &self,
-        f: &mut Frame<B>,
+        f: &mut Frame,
         area: Rect,
         separator_name: &str,
         model_info: &ModelInfo,
@@ -814,12 +808,7 @@ impl StatsView {
         f.render_widget(summary, area);
     }
 
-    fn render_separator_details<B: Backend>(
-        &mut self,
-        f: &mut Frame<B>,
-        area: Rect,
-        model_info: &ModelInfo,
-    ) {
+    fn render_separator_details(&mut self, f: &mut Frame, area: Rect, model_info: &ModelInfo) {
         let mut detail_lines = Vec::new();
 
         if let Some(arrival_models) = model_info

@@ -1,7 +1,6 @@
 use anyhow::Result;
 use crossterm::event::KeyCode;
 use tui::{
-    backend::Backend,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
@@ -131,8 +130,8 @@ impl AppState {
 }
 
 // Main UI drawing function that renders the entire interface
-pub fn draw_ui<B: Backend>(f: &mut Frame<B>, app: &mut AppState) {
-    let size = f.size();
+pub fn draw_ui(f: &mut Frame, app: &mut AppState) {
+    let size = f.area();
 
     if app.focused_panel == FocusPanel::DetailView {
         if let Some(task_id) = app.get_selected_process() {
@@ -237,7 +236,7 @@ pub fn draw_ui<B: Backend>(f: &mut Frame<B>, app: &mut AppState) {
 }
 
 // Renders help text for normal mode navigation
-fn draw_help_text_normal_mode<B: Backend>(f: &mut Frame<B>, area: Rect) {
+fn draw_help_text_normal_mode(f: &mut Frame, area: Rect) {
     let help_text = vec![
         Line::from(vec![
             Span::styled(
@@ -282,7 +281,7 @@ fn draw_help_text_normal_mode<B: Backend>(f: &mut Frame<B>, area: Rect) {
 }
 
 // Renders help text for detail view mode
-fn draw_help_text_detail_mode<B: Backend>(f: &mut Frame<B>, area: Rect) {
+fn draw_help_text_detail_mode(f: &mut Frame, area: Rect) {
     let help_text = vec![
         Line::from(vec![
             Span::styled(
