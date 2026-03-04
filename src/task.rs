@@ -155,7 +155,7 @@ pub mod mapper {
 
     use crate::{
         context::LimeContext,
-        events::{EventData, SchedulingPolicy, TraceEvent},
+        events::{EventData, ProcessInfo, SchedulingPolicy, TraceEvent},
     };
 
     use super::{AffinityMask, TaskId, TaskInfos, TimeReference};
@@ -205,7 +205,9 @@ pub mod mapper {
 
         fn duplicate_entry(&mut self, old_mapping: TaskId, new_mapping: TaskId) {
             if let Some(old_info) = self.get(old_mapping) {
-                let new_info = old_info.clone();
+                let mut new_info = old_info.clone();
+
+                new_info.first_event_time = None;
 
                 self.thread_infos.insert(new_mapping, new_info);
             }
@@ -242,6 +244,46 @@ pub mod mapper {
 
         pub fn set_time_reference(&mut self, time_reference: Option<TimeReference>) {
             self.time_reference = time_reference;
+        }
+
+        fn extract_process_info(event: &TraceEvent) -> Option<&ProcessInfo> {
+            match &event.ev {
+                EventData::ProcessInfoUpdate { process_info } => process_info.as_ref(),
+                _ => None,
+            }
+        }
+
+        fn apply_process_info(task_info: &mut TaskInfos, process_info: Option<&ProcessInfo>) {
+            if let Some(info) = process_info {
+                if let Some(ppid) = info.ppid {
+                    task_info.ppid = Some(ppid);
+                }
+
+                if let Some(comm) = &info.comm {
+                    task_info.comm = Some(comm.clone());
+                }
+
+                if let Some(cmd) = &info.cmd {
+                    task_info.cmd = Some(cmd.clone());
+                }
+            }
+        }
+
+        fn resolve_policy(&mut self, pid: u32, policy: SchedulingPolicy) -> SchedulingPolicy {
+            if policy == SchedulingPolicy::Unknown {
+                self.get_sched_policy(pid).unwrap_or(policy)
+            } else {
+                policy
+            }
+        }
+
+        fn apply_policy_update(
+            &mut self,
+            task_info: &mut TaskInfos,
+            pid: u32,
+            policy: SchedulingPolicy,
+        ) {
+            task_info.policy = self.resolve_policy(pid, policy);
         }
 
         fn sched_getattr(pid: u32) -> Result<SchedulingPolicy> {
@@ -288,6 +330,41 @@ pub mod mapper {
             None
         }
 
+        fn string_missing(value: &Option<String>) -> bool {
+            value.as_ref().map(|s| s.is_empty()).unwrap_or(true)
+        }
+
+        fn maybe_populate_from_sysinfo(&mut self, task_info: &mut TaskInfos, target_pid: u32) {
+            let need_ppid = task_info.ppid.is_none();
+            let need_comm = Self::string_missing(&task_info.comm);
+            let need_cmd = Self::string_missing(&task_info.cmd);
+
+            if !need_ppid && !need_comm && !need_cmd {
+                return;
+            }
+
+            let proc_info = self.get_sys_process(target_pid);
+
+            if let Some(process) = proc_info {
+                if need_ppid {
+                    task_info.ppid = Self::get_ppid(process);
+                }
+                if need_comm {
+                    task_info.comm = Some(Self::get_comm(process));
+                }
+                if need_cmd {
+                    task_info.cmd = Some(Self::get_cmd(process));
+                }
+            } else {
+                if need_comm {
+                    task_info.comm = None;
+                }
+                if need_cmd {
+                    task_info.cmd = None;
+                }
+            }
+        }
+
         pub fn get_sched_policy(&mut self, pid: u32) -> Result<SchedulingPolicy> {
             Self::sched_getattr(pid)
         }
@@ -306,12 +383,6 @@ pub mod mapper {
         }
 
         pub fn build_new_task_info(&mut self, event: &TraceEvent) -> TaskInfos {
-            let p = self.get_sys_process(event.id.pid);
-
-            let ppid = p.and_then(Self::get_ppid);
-            let comm = p.map(Self::get_comm);
-            let cmd = p.map(Self::get_cmd);
-
             let policy = self
                 .get_sched_policy(event.id.pid)
                 .unwrap_or(SchedulingPolicy::Unknown);
@@ -323,20 +394,38 @@ pub mod mapper {
                 .as_ref()
                 .and_then(|time_ref| time_ref.create_event_time(event.ts).ok());
 
-            TaskInfos {
+            let mut task_info = TaskInfos {
                 id: event.id,
-                ppid,
-                comm,
-                cmd,
+                ppid: None,
+                comm: None,
+                cmd: None,
                 policy,
                 affinity_mask,
                 first_event_time: event_time.clone(),
                 last_event_time: event_time,
+            };
+
+            let event_process_info = Self::extract_process_info(event);
+            Self::apply_process_info(&mut task_info, event_process_info);
+
+            let needs_initial_lookup = task_info.ppid.is_none()
+                || Self::string_missing(&task_info.comm)
+                || Self::string_missing(&task_info.cmd);
+
+            if needs_initial_lookup {
+                self.maybe_populate_from_sysinfo(&mut task_info, event.id.tgid);
             }
+
+            task_info
         }
 
         pub fn update_task_info(&mut self, task_info: &mut TaskInfos, event: &TraceEvent) {
-            let mut refresh_cmd = task_info.cmd.as_ref().is_some_and(|s| s.is_empty());
+            let mut need_sys_lookup = false;
+
+            if task_info.cmd.as_ref().is_some_and(|s| s.is_empty()) {
+                task_info.cmd = None;
+                need_sys_lookup = true;
+            }
 
             if task_info.id.tgid == 0 {
                 task_info.id.tgid = event.id.tgid;
@@ -344,42 +433,47 @@ pub mod mapper {
 
             match event.ev {
                 EventData::SchedulerChanged {
-                    sched_policy: policy,
-                } if policy == SchedulingPolicy::Unknown => {
-                    let new_policy = self.get_sched_policy(event.id.pid);
-
-                    task_info.policy = new_policy.unwrap_or(policy);
+                    sched_policy: ref policy,
                 }
-                EventData::SchedulerChanged {
-                    sched_policy: policy,
+                | EventData::SchedParamsChanged {
+                    sched_policy: ref policy,
                 } => {
-                    task_info.policy = policy;
+                    self.apply_policy_update(task_info, event.id.pid, *policy);
                 }
-                EventData::SchedProcessFork {
-                    sched_policy: policy,
+                EventData::SchedPolicyUpdate {
+                    sched_policy: ref policy,
                 } => {
-                    task_info.policy = policy;
+                    self.apply_policy_update(task_info, event.id.pid, *policy);
                 }
-                EventData::SchedProcessExec => {
-                    refresh_cmd = true;
+                EventData::SchedProcessExec {} => {}
+                EventData::EnterSchedSetAffinity {} => {}
+                EventData::AffinityChange {} => {}
+                EventData::AffinityChanged {} => {
+                    task_info.affinity_mask = self.get_affinity_mask(event.id.pid).ok();
                 }
-                EventData::AffinityChanged => {
-                    let affinity_mask = self.get_affinity_mask(event.id.pid).ok();
-
-                    task_info.affinity_mask = affinity_mask;
+                EventData::AffinityUpdate { ref cpumask } => {
+                    task_info.affinity_mask = match cpumask {
+                        Some(cpu_ids) => Some(AffinityMask {
+                            cpu_set: cpu_ids.clone(),
+                        }),
+                        None => self.get_affinity_mask(event.id.pid).ok(),
+                    };
+                }
+                EventData::ProcessInfoUpdate { ref process_info } => {
+                    Self::apply_process_info(task_info, process_info.as_ref());
                 }
                 _ => {}
             }
 
-            if refresh_cmd {
-                let p = self.get_sys_process(event.id.pid);
-
-                task_info.comm = p.map(Self::get_comm);
-                task_info.cmd = p.map(Self::get_cmd);
+            if need_sys_lookup {
+                self.maybe_populate_from_sysinfo(task_info, event.id.tgid);
             }
 
             if let Some(time_ref) = &self.time_reference {
                 if let Ok(event_time) = time_ref.create_event_time(event.ts) {
+                    if task_info.first_event_time.is_none() {
+                        task_info.first_event_time = Some(event_time.clone());
+                    }
                     task_info.last_event_time = Some(event_time);
                 }
             }
@@ -459,15 +553,15 @@ pub mod mapper {
 
         fn should_update_mapping(&self, event: &TraceEvent) -> bool {
             match event.ev {
-                EventData::SchedulerChange { sched_policy } => {
+                EventData::SchedulerChange { sched_policy, .. } => {
                     self.tracked_policies.contains(&sched_policy.policy_num())
                 }
-                EventData::SchedParamsChange { sched_policy }
+                EventData::SchedParamsChange { sched_policy, .. }
                     if !self.allow_task_priority_change =>
                 {
                     self.tracked_policies.contains(&sched_policy.policy_num())
                 }
-                EventData::AffinityChange if !self.allow_task_affinity_change => true,
+                EventData::AffinityChange { .. } if !self.allow_task_affinity_change => true,
                 EventData::LimeThrottleRelease => true,
                 _ => false,
             }
@@ -476,18 +570,18 @@ pub mod mapper {
         fn should_invalidate_mapping(&self, event: &TraceEvent) -> bool {
             match event.ev {
                 EventData::SchedSwitchedOut { state, .. } => (state & 0x30) != 0,
-                EventData::SchedulerChange { sched_policy } => {
+                EventData::SchedulerChange { sched_policy, .. } => {
                     !self.tracked_policies.contains(&sched_policy.policy_num())
                 }
-                EventData::SchedParamsChange { sched_policy }
+                EventData::SchedParamsChange { sched_policy, .. }
                     if !self.allow_task_priority_change =>
                 {
                     !self.tracked_policies.contains(&sched_policy.policy_num())
                 }
-                EventData::SchedulerChanged { sched_policy } => {
+                EventData::SchedulerChanged { sched_policy, .. } => {
                     !self.tracked_policies.contains(&sched_policy.policy_num())
                 }
-                EventData::SchedParamsChanged { sched_policy }
+                EventData::SchedParamsChanged { sched_policy, .. }
                     if !self.allow_task_priority_change =>
                 {
                     !self.tracked_policies.contains(&sched_policy.policy_num())

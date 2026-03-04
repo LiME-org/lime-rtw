@@ -3,6 +3,17 @@
 
 #include "vmlinux.h"
 
+#define LIME_CMD_LEN 512
+#define LIME_CMD_CHUNK_LEN 32
+#define LIME_CMD_CHUNK_COUNT (LIME_CMD_LEN / LIME_CMD_CHUNK_LEN)
+
+#define CPUMASK_U64_COUNT 16  // Covers 1024 CPUs (16 * 64 bits)
+#define LIME_AFFINITY_CHUNK_LEN LIME_CMD_CHUNK_LEN
+#define LIME_AFFINITY_CHUNK_WORDS (LIME_AFFINITY_CHUNK_LEN / sizeof(__u64))
+#define LIME_AFFINITY_CHUNK_COUNT                                             \
+    ((CPUMASK_U64_COUNT + LIME_AFFINITY_CHUNK_WORDS - 1) /                     \
+     LIME_AFFINITY_CHUNK_WORDS)
+
 typedef enum clock_id {
     CLOCK_REALTIME,
     CLOCK_MONOTONIC,			    
@@ -66,6 +77,13 @@ typedef enum event_type {
     SCHED_SCHEDULER_CHANGE_FAILED,
     ENTER_SCHED_YIELD,
     ENTER_DL_TIMER,
+    PROCESS_INFO_START,
+    PROCESS_INFO_CMD_CHUNK,
+    PROCESS_INFO_END,
+    SCHED_POLICY_UPDATE,
+    AFFINITY_UPDATE_START,
+    AFFINITY_UPDATE_CHUNK,
+    AFFINITY_UPDATE_CHUNK_END,
 } event_type_t;
 
 struct sched_switch {
@@ -204,6 +222,25 @@ struct lime_sched_attr {
     } attrs;
 };
 
+struct lime_process_info_start {
+    __u32 ppid;
+    char comm[TASK_COMM_LEN];
+};
+
+struct lime_process_info_chunk {
+    __u32 chunk_len;
+    char chunk[LIME_CMD_CHUNK_LEN];
+};
+
+struct lime_affinity_update_start {
+    __u32 chunk_count;
+};
+
+struct lime_affinity_update_chunk {
+    __u32 chunk_len;
+    __u64 mask[LIME_AFFINITY_CHUNK_WORDS];
+};
+
 enum si_code {
     SI_USER = 0,		/* sent by kill, sigsend, raise */
     SI_KERNEL = 0x80,		/* sent by the kernel from somewhere */
@@ -247,6 +284,8 @@ struct lime_event {
 
         // Thread info
         struct lime_thread_info thread_info;
+        struct lime_process_info_start process_info_start;
+        struct lime_process_info_chunk process_info_chunk;
 
         // arrival sites
         struct clock_nanosleep clock_nanosleep;
@@ -265,12 +304,23 @@ struct lime_event {
         struct enter_semop enter_semop;
         struct deliver_rt_sig deliver_rt_sig;
         struct lime_sched_attr sched_attr;
+        struct lime_affinity_update_start affinity_update_start;
+        struct lime_affinity_update_chunk affinity_update_chunk;
         struct dl_timer dl_timer;
 
 
         struct exit_ar exit_ar;
     } evd;
 };
+
+// Size calc: (ev_type (4) + pad-to-__u64) + pid_tgid (8) + ts (8)
+// + union max (40: lime_process_info_chunk rounded to __u64 alignment) =>
+// 64 bytes
+enum {
+    LIME_EVENT_SIZE_BYTES = 64,
+};
+_Static_assert(sizeof(struct lime_event) == LIME_EVENT_SIZE_BYTES,
+               "lime_event size changed;");
 
 struct rt_thread_info {
     __u64 pid_tgid;

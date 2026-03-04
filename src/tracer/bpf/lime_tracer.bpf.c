@@ -2,8 +2,26 @@
 
 #include <bpf/bpf_core_read.h>
 #include <bpf/bpf_helpers.h>
-
+#include <bpf/bpf_tracing.h>
 #include <linux/version.h>
+
+#ifndef LIME_TARGET_KERNEL_VERSION_CODE
+#ifdef LINUXKERNEL_VERSION_CODE
+#define LIME_TARGET_KERNEL_VERSION_CODE LINUXKERNEL_VERSION_CODE
+#else
+#define LIME_TARGET_KERNEL_VERSION_CODE LINUX_VERSION_CODE
+#endif
+#endif
+
+#if LIME_TARGET_KERNEL_VERSION_CODE >= KERNEL_VERSION(6, 12, 0)
+#define HAS_BPF_TASK_KFUNC 1
+#define __ksym __attribute__((section(".ksyms")))
+extern struct task_struct *bpf_task_from_pid(s32 pid) __ksym;
+extern void bpf_task_release(struct task_struct *task) __ksym;
+#undef __ksym
+#else
+#define HAS_BPF_TASK_KFUNC 0
+#endif
 
 #include "lime_tracer.h"
 
@@ -116,7 +134,7 @@ static inline u32 get_task_state(struct task_struct *t) {
 static inline u32 get_task_cpu(struct task_struct *t) {
   u32 cpu;
 
-#if LINUXKERNEL_VERSION_CODE >= KERNEL_VERSION(5, 16, 0)
+#if LIME_TARGET_KERNEL_VERSION_CODE >= KERNEL_VERSION(5, 16, 0)
   bpf_core_read(&cpu, sizeof(cpu), &t->thread_info.cpu);
 #else
   bpf_core_read(&cpu, sizeof(cpu), &t->on_cpu);
@@ -140,6 +158,122 @@ static inline u64 get_pid_tgid(struct task_struct *t) {
   return ret;
 }
 
+static inline void fill_sched_attr(struct task_struct *t,
+                                   struct lime_sched_attr *attr) {
+  u32 policy;
+
+  if (!attr)
+    return;
+
+  __builtin_memset(attr, 0, sizeof(*attr));
+
+  if (!t)
+    return;
+
+  policy = get_sched_policy(t);
+  attr->policy = policy;
+
+  switch (policy) {
+  case SCHED_FIFO:
+  case SCHED_RR:
+    attr->attrs.rt.prio = t->rt_priority;
+    break;
+
+  case SCHED_DEADLINE:
+    attr->attrs.dl.runtime = t->dl.dl_runtime;
+    attr->attrs.dl.period = t->dl.dl_period;
+    attr->attrs.dl.deadline = t->dl.dl_deadline;
+    break;
+
+  default:
+    break;
+  }
+}
+
+static inline void fill_affinity_mask(struct task_struct *t,
+                                      __u64 mask[CPUMASK_U64_COUNT]) {
+  if (!t || !mask)
+    return;
+
+  int cpu_count = 0;
+  bpf_core_read(&cpu_count, sizeof(cpu_count), &t->nr_cpus_allowed);
+  if (cpu_count <= 0 || cpu_count > (CPUMASK_U64_COUNT * 64))
+    cpu_count = CPUMASK_U64_COUNT * 64;
+
+#pragma unroll
+  for (int i = 0; i < CPUMASK_U64_COUNT; i++) {
+    unsigned long word = 0;
+    int bit_base = i * 64;
+
+    if (bit_base >= cpu_count) {
+      mask[i] = 0;
+      continue;
+    }
+
+    bpf_core_read(&word, sizeof(word), &t->cpus_mask.bits[i]);
+    int bits_remaining = cpu_count - bit_base;
+    if (bits_remaining < 64) {
+      unsigned long mask = (1UL << bits_remaining) - 1;
+      word &= mask;
+    }
+
+    mask[i] = word;
+  }
+}
+
+static inline struct task_struct *
+get_target_task(u32 target_pid, u64 current_pid_tgid,
+                struct task_struct **ref_task) {
+  *ref_task = NULL;
+
+  if (!target_pid || target_pid == (u32)current_pid_tgid)
+    return (struct task_struct *)bpf_get_current_task_btf();
+
+#if HAS_BPF_TASK_KFUNC
+  struct task_struct *task = bpf_task_from_pid((s32)target_pid);
+  if (task)
+    *ref_task = task;
+
+  return task;
+#else
+  return NULL;
+#endif
+}
+
+static inline void release_task(struct task_struct *ref_task) {
+#if HAS_BPF_TASK_KFUNC
+  if (ref_task)
+    bpf_task_release(ref_task);
+#else
+  (void)ref_task;
+#endif
+}
+
+struct sched_target_ctx {
+  struct task_struct *task;
+  struct task_struct *ref_task;
+  bool same_task;
+  bool target_is_real;
+  u64 dst_pid_tgid;
+};
+
+static inline void prepare_sched_target(pid_t requested_pid, u64 pid_tgid,
+                                        struct sched_target_ctx *ctx) {
+  struct task_struct *target = get_target_task(
+      requested_pid ? requested_pid : (u32)pid_tgid, pid_tgid, &ctx->ref_task);
+  bool same_task = (!requested_pid || requested_pid == (u32)pid_tgid);
+
+  if (!target && same_task)
+    target = (struct task_struct *)bpf_get_current_task_btf();
+
+  ctx->task = target;
+  ctx->same_task = same_task;
+  ctx->target_is_real = target && (ctx->ref_task || same_task);
+  ctx->dst_pid_tgid =
+      ctx->target_is_real ? get_pid_tgid(target)
+                          : (requested_pid ? (u64)requested_pid : pid_tgid);
+}
+
 static inline u64 now() { return bpf_ktime_get_boot_ns(); }
 
 static inline void submit_event(struct lime_event *event) {
@@ -151,6 +285,201 @@ static inline void submit_event(struct lime_event *event) {
       (sz >= LIME_EVENT_BATCH_SIZE) ? BPF_RB_FORCE_WAKEUP : BPF_RB_NO_WAKEUP;
 
   bpf_ringbuf_submit(event, flags);
+}
+
+static inline void emit_process_info_event(struct task_struct *t) {
+  struct lime_event *event;
+  struct mm_struct *mm = NULL;
+  unsigned long arg_start = 0;
+  unsigned long arg_end = 0;
+  unsigned long total_bytes = 0;
+  u64 pid_tgid;
+  u64 ts;
+
+  if (!t)
+    return;
+
+  pid_tgid = get_pid_tgid(t);
+  ts = now();
+
+  event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+  if (!event)
+    return;
+
+  event->ev_type = PROCESS_INFO_START;
+  event->pid_tgid = pid_tgid;
+  event->ts = ts;
+  event->evd.process_info_start.ppid = get_ppid(t);
+  bpf_probe_read_kernel_str(event->evd.process_info_start.comm,
+                            sizeof(event->evd.process_info_start.comm), t->comm);
+  submit_event(event);
+
+  bpf_core_read(&mm, sizeof(mm), &t->mm);
+  if (!mm)
+    goto end;
+
+  bpf_core_read(&arg_start, sizeof(arg_start), &mm->arg_start);
+  bpf_core_read(&arg_end, sizeof(arg_end), &mm->arg_end);
+  if (arg_end <= arg_start)
+    goto end;
+
+  total_bytes = arg_end - arg_start;
+  if (total_bytes > LIME_CMD_LEN)
+    total_bytes = LIME_CMD_LEN;
+
+#pragma unroll
+  for (int idx = 0; idx < LIME_CMD_CHUNK_COUNT; idx++) {
+    unsigned long offset = (__u64)idx * LIME_CMD_CHUNK_LEN;
+
+    if (offset >= total_bytes)
+      break;
+
+    __u64 chunk_len = LIME_CMD_CHUNK_LEN;
+    if (offset + chunk_len > total_bytes)
+      chunk_len = (total_bytes - offset);
+
+    // Hard clamp for verifier and helper argument bounds.
+    if (chunk_len > sizeof(event->evd.process_info_chunk.chunk))
+      chunk_len = sizeof(event->evd.process_info_chunk.chunk);
+
+    event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+    if (!event)
+      break;
+
+    event->ev_type = PROCESS_INFO_CMD_CHUNK;
+    event->pid_tgid = pid_tgid;
+    event->ts = ts;
+    event->evd.process_info_chunk.chunk_len = chunk_len;
+    __builtin_memset(event->evd.process_info_chunk.chunk, 0,
+                     sizeof(event->evd.process_info_chunk.chunk));
+    if (chunk_len > 0) {
+      bpf_probe_read_user(event->evd.process_info_chunk.chunk, chunk_len,
+                          (void *)(arg_start + offset));
+    }
+    submit_event(event);
+  }
+
+end:
+  event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+  if (!event)
+    return;
+
+  event->ev_type = PROCESS_INFO_END;
+  event->pid_tgid = pid_tgid;
+  event->ts = ts;
+  submit_event(event);
+}
+
+static inline void emit_sched_policy_update_event(struct task_struct *t) {
+  struct lime_event *event;
+
+  if (!t)
+    return;
+
+  event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+  if (!event)
+    return;
+
+  event->ev_type = SCHED_POLICY_UPDATE;
+  event->pid_tgid = get_pid_tgid(t);
+  event->ts = now();
+  fill_sched_attr(t, &event->evd.sched_attr);
+
+  submit_event(event);
+}
+
+static inline void emit_affinity_update_event(struct task_struct *t) {
+  struct lime_event *event;
+  __u64 mask[CPUMASK_U64_COUNT] = {};
+  __u64 pid_tgid;
+  u64 ts;
+  const __u32 chunk_count = LIME_AFFINITY_CHUNK_COUNT;
+
+  if (!t)
+    return;
+
+  fill_affinity_mask(t, mask);
+  pid_tgid = get_pid_tgid(t);
+  ts = now();
+
+  event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+  if (!event)
+    return;
+
+  event->ev_type = AFFINITY_UPDATE_START;
+  event->pid_tgid = pid_tgid;
+  event->ts = ts;
+  event->evd.affinity_update_start.chunk_count = chunk_count;
+  submit_event(event);
+
+#pragma unroll
+  for (int chunk = 0; chunk < LIME_AFFINITY_CHUNK_COUNT; chunk++) {
+    __u32 word_base = chunk * LIME_AFFINITY_CHUNK_WORDS;
+    __u32 remaining_words = 0;
+    __u32 copy_words = 0;
+
+    if (word_base >= CPUMASK_U64_COUNT)
+      break;
+
+    remaining_words = CPUMASK_U64_COUNT - word_base;
+    copy_words = remaining_words < LIME_AFFINITY_CHUNK_WORDS
+                     ? remaining_words
+                     : LIME_AFFINITY_CHUNK_WORDS;
+
+    event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+    if (!event)
+      break;
+
+    event->ev_type = (chunk == (LIME_AFFINITY_CHUNK_COUNT - 1))
+                         ? AFFINITY_UPDATE_CHUNK_END
+                         : AFFINITY_UPDATE_CHUNK;
+    event->pid_tgid = pid_tgid;
+    event->ts = ts;
+    event->evd.affinity_update_chunk.chunk_len =
+        copy_words * sizeof(__u64);
+
+    for (int i = 0; i < LIME_AFFINITY_CHUNK_WORDS; i++) {
+      __u32 word_idx = word_base + i;
+      if (i < copy_words && word_idx < CPUMASK_U64_COUNT) {
+        event->evd.affinity_update_chunk.mask[i] = mask[word_idx];
+      } else {
+        event->evd.affinity_update_chunk.mask[i] = 0;
+      }
+    }
+
+    submit_event(event);
+  }
+
+}
+
+static inline void emit_full_process_update(struct task_struct *t) {
+  if (!t)
+    return;
+
+  emit_process_info_event(t);
+  emit_sched_policy_update_event(t);
+  emit_affinity_update_event(t);
+}
+
+static inline int emit_sched_attr_event(struct task_struct *t,
+                                        event_type_t type,
+                                        u64 pid_tgid) {
+  struct lime_event *event;
+
+  if (!t)
+    return 0;
+
+  event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+  if (!event)
+    return -ENOMEM;
+
+  event->ts = now();
+  event->ev_type = type;
+  event->pid_tgid = pid_tgid;
+  fill_sched_attr(t, &event->evd.sched_attr);
+
+  submit_event(event);
+  return 0;
 }
 
 static int filter_out_task(struct task_struct *t) {
@@ -321,84 +650,44 @@ int handle_sched_migrate_task(struct sched_migrate_task_args *ctx) {
 
 SEC("tp_btf/sched_process_exit")
 int on_sched_process_exit(u64 *ctx) {
-  struct lime_event *event;
   struct task_struct *t = (struct task_struct *)ctx[0];
-
   u64 pid_tgid = get_pid_tgid(t);
+
   bpf_map_delete_elem(&throttled, &pid_tgid);
 
   if (filter_out_task(t))
     return 0;
 
-  event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-  if (!event)
-    return -ENOMEM;
-
-  event->ts = now();
-  event->ev_type = SCHED_PROCESS_EXIT;
-  event->pid_tgid = pid_tgid;
-
-  submit_event(event);
-
-  return 0;
+  emit_full_process_update(t);
+  return emit_sched_attr_event(t, SCHED_PROCESS_EXIT, pid_tgid);
 }
 
 SEC("tp_btf/sched_process_exec")
 int on_sched_process_exec(u64 *ctx) {
-  struct lime_event *event;
   struct task_struct *t = (struct task_struct *)ctx[0];
+  u64 pid_tgid;
 
   if (filter_out_task(t))
     return 0;
 
-  event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-  if (!event)
-    return -ENOMEM;
-
-  event->ts = now();
-  event->ev_type = SCHED_PROCESS_EXEC;
-  event->pid_tgid = get_pid_tgid(t);
-
-  submit_event(event);
+  pid_tgid = get_pid_tgid(t);
+  emit_full_process_update(t);
+  emit_sched_attr_event(t, SCHED_PROCESS_EXEC, pid_tgid);
 
   return 0;
 }
 
 SEC("tp_btf/sched_process_fork")
 int on_sched_process_fork(u64 *ctx) {
-  struct lime_event *event;
   struct task_struct *t = (struct task_struct *)ctx[1];
+  u64 pid_tgid;
 
   if (filter_out_task(t))
     return 0;
 
-  event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-  if (!event)
-    return -ENOMEM;
-
-  event->ts = now();
-  event->ev_type = SCHED_PROCESS_FORK;
-  event->pid_tgid = get_pid_tgid(t);
-
-  event->evd.sched_attr.policy = t->policy;
-
-  switch (t->policy) {
-  case SCHED_FIFO:
-  case SCHED_RR:
-    event->evd.sched_attr.attrs.rt.prio = t->rt_priority;
-    break;
-
-  case SCHED_DEADLINE:
-    event->evd.sched_attr.attrs.dl.runtime = t->dl.dl_runtime;
-    event->evd.sched_attr.attrs.dl.period = t->dl.dl_period;
-    event->evd.sched_attr.attrs.dl.deadline = t->dl.dl_deadline;
-    break;
-
-  default:
-    break;
-  }
-
-  submit_event(event);
+  pid_tgid = get_pid_tgid(t);
+  emit_full_process_update(t);
+  emit_sched_attr_event(t, SCHED_PROCESS_FORK, pid_tgid);
 
   return 0;
 }
@@ -490,42 +779,46 @@ int handle_sys_enter_sched_setscheduler(struct sched_setscheduler_args *ctx) {
   struct lime_event *event;
   u64 pid_tgid, dst_pid_tgid;
   u32 pid = ctx->pid;
-  int prio;
+  int prio = 0;
   struct sched_param *p;
   long err;
-
-  struct task_struct *t = (struct task_struct *)bpf_get_current_task();
-
-  pid_tgid = bpf_get_current_pid_tgid();
+  struct sched_target_ctx target_ctx = {};
 
   if (!ctx->params)
     return 0;
 
+  pid_tgid = bpf_get_current_pid_tgid();
+  prepare_sched_target(pid, pid_tgid, &target_ctx);
+
+  if (target_ctx.same_task && target_ctx.task && filter_out_task(target_ctx.task)) {
+    release_task(target_ctx.ref_task);
+    return 0;
+  }
+
   event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-  if (!event)
+  if (!event) {
+    release_task(target_ctx.ref_task);
     return -ENOMEM;
+  }
 
   event->ts = now();
-
-  if (!pid) {
-    dst_pid_tgid = pid_tgid;
-  } else {
-    dst_pid_tgid = pid;
-  }
+  dst_pid_tgid = target_ctx.dst_pid_tgid;
   event->pid_tgid = dst_pid_tgid;
 
   err = bpf_map_update_elem(&changing, &pid_tgid, &dst_pid_tgid, BPF_NOEXIST);
-  /*
-
   if (err < 0) {
-      bpf_ringbuf_discard(event, 0);
-      return err;
+    bpf_ringbuf_discard(event, 0);
+    release_task(target_ctx.ref_task);
+    return err;
   }
-  */
 
   event->ev_type = ENTER_SCHED_SETSCHEDULER;
   event->evd.sched_attr.policy = ctx->policy;
-  event->evd.sched_attr.old_policy = get_sched_policy(t);
+  if (target_ctx.task)
+    event->evd.sched_attr.old_policy = get_sched_policy(target_ctx.task);
+  else
+    event->evd.sched_attr.old_policy =
+        get_sched_policy((struct task_struct *)bpf_get_current_task_btf());
 
   switch (ctx->policy) {
   case SCHED_FIFO:
@@ -541,22 +834,32 @@ int handle_sys_enter_sched_setscheduler(struct sched_setscheduler_args *ctx) {
 
   submit_event(event);
 
+  release_task(target_ctx.ref_task);
+
   return 0;
 }
 
 static inline int on_ret_change_scheduler(void *ctx, int retval) {
   struct lime_event *event;
   __u64 pidtgid = bpf_get_current_pid_tgid();
+  struct task_struct *target = NULL;
+  struct task_struct *ref_task = NULL;
+  u32 target_pid = 0;
 
   __u64 *dst_pidtgid = bpf_map_lookup_elem(&changing, &pidtgid);
   if (!dst_pidtgid) {
     return -1;
   }
 
+  target_pid = (u32)(*dst_pidtgid);
+  target = get_target_task(target_pid, pidtgid, &ref_task);
+
   event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
 
-  if (!event)
+  if (!event) {
+    release_task(ref_task);
     return -ENOMEM;
+  }
 
   event->ts = now();
   event->pid_tgid = *dst_pidtgid;
@@ -567,9 +870,21 @@ static inline int on_ret_change_scheduler(void *ctx, int retval) {
     event->ev_type = SCHED_SCHEDULER_CHANGE_FAILED;
   }
 
+  if (target)
+    fill_sched_attr(target, &event->evd.sched_attr);
+  else
+    __builtin_memset(&event->evd.sched_attr, 0, sizeof(event->evd.sched_attr));
+
   bpf_map_delete_elem(&changing, &pidtgid);
 
   submit_event(event);
+
+  if (!retval) {
+    emit_process_info_event(target);
+    emit_affinity_update_event(target);
+  }
+
+  release_task(ref_task);
 
   return 0;
 }
@@ -593,41 +908,51 @@ int handle_sys_enter_sched_setattr(struct sched_setattr_args *ctx) {
   struct lime_event *event;
   u64 pid_tgid, dst_pid_tgid;
   u32 pid = ctx->pid;
-  u32 prio;
+  u32 prio = 0;
   int policy;
   u64 runtime, period, deadline;
   long err;
+  struct sched_target_ctx target_ctx = {};
 
-  struct task_struct *t = (struct task_struct *)bpf_get_current_task();
   struct sched_attr *attrs = ctx->attrs;
+  if (!attrs)
+    return 0;
+
   pid_tgid = bpf_get_current_pid_tgid();
+  prepare_sched_target(pid, pid_tgid, &target_ctx);
+
+  if (target_ctx.same_task && target_ctx.task && filter_out_task(target_ctx.task)) {
+    release_task(target_ctx.ref_task);
+    return 0;
+  }
 
   event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
 
-  if (!event)
+  if (!event) {
+    release_task(target_ctx.ref_task);
     return -ENOMEM;
+  }
 
   event->ts = now();
   event->ev_type = ENTER_SCHED_SETATTR;
 
-  pid_tgid = bpf_get_current_pid_tgid();
-
-  if (!pid) {
-    dst_pid_tgid = pid_tgid;
-  } else {
-    dst_pid_tgid = pid;
-  }
+  dst_pid_tgid = target_ctx.dst_pid_tgid;
   event->pid_tgid = dst_pid_tgid;
 
   err = bpf_map_update_elem(&changing, &pid_tgid, &dst_pid_tgid, BPF_NOEXIST);
   if (err < 0) {
     bpf_ringbuf_discard(event, 0);
+    release_task(target_ctx.ref_task);
     return err;
   }
 
   bpf_core_read_user(&policy, sizeof(policy), &attrs->sched_policy);
   event->evd.sched_attr.policy = policy;
-  event->evd.sched_attr.old_policy = get_sched_policy(t);
+  if (target_ctx.task)
+    event->evd.sched_attr.old_policy = get_sched_policy(target_ctx.task);
+  else
+    event->evd.sched_attr.old_policy =
+        get_sched_policy((struct task_struct *)bpf_get_current_task_btf());
 
   switch (policy) {
   case SCHED_FIFO:
@@ -652,6 +977,7 @@ int handle_sys_enter_sched_setattr(struct sched_setattr_args *ctx) {
   }
 
   submit_event(event);
+  release_task(target_ctx.ref_task);
 
   return 0;
 }
@@ -665,41 +991,46 @@ int handle_sys_exit_sched_setattr(struct exit_ar_args *ctx) {
 
 struct enter_setaffinity_args {
   __u64 unused[2];
-  u64 pid;
+  pid_t pid;           // First syscall arg
+  size_t cpusetsize;   // Second syscall arg
+  const unsigned long *user_mask_ptr;  // Third syscall arg
 };
 
 SEC("tracepoint/syscalls/sys_enter_sched_setaffinity")
 int handle_sys_enter_sched_setaffinity(struct enter_setaffinity_args *ctx) {
-  u64 ts;
-  u64 pid_tgid, dst_pid_tgid;
   struct lime_event *event;
+  u64 pid_tgid, dst_pid_tgid;
   long err;
-
-  ts = now();
+  struct sched_target_ctx target_ctx = {};
 
   pid_tgid = bpf_get_current_pid_tgid();
-  if (!ctx->pid) {
-    dst_pid_tgid = pid_tgid;
-  } else {
-    dst_pid_tgid = ctx->pid;
-  }
+  prepare_sched_target(ctx->pid, pid_tgid, &target_ctx);
 
-  err = bpf_map_update_elem(&changing, &pid_tgid, &dst_pid_tgid, BPF_NOEXIST);
-  if (err < 0) {
-    return err;
+  if (target_ctx.same_task && target_ctx.task && filter_out_task(target_ctx.task)) {
+    release_task(target_ctx.ref_task);
+    return 0;
   }
 
   event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-  if (!event)
+  if (!event) {
+    release_task(target_ctx.ref_task);
     return -ENOMEM;
+  }
 
+  event->ts = now();
+  event->ev_type = ENTER_SCHED_SETAFFINITY;
+  dst_pid_tgid = target_ctx.dst_pid_tgid;
   event->pid_tgid = dst_pid_tgid;
 
-  event->ev_type = ENTER_SCHED_SETAFFINITY;
-  event->pid_tgid = pid_tgid;
-  event->ts = ts;
+  err = bpf_map_update_elem(&changing, &pid_tgid, &dst_pid_tgid, BPF_NOEXIST);
+  if (err < 0) {
+    bpf_ringbuf_discard(event, 0);
+    release_task(target_ctx.ref_task);
+    return err;
+  }
 
   submit_event(event);
+  release_task(target_ctx.ref_task);
 
   return 0;
 }
@@ -707,26 +1038,31 @@ int handle_sys_enter_sched_setaffinity(struct enter_setaffinity_args *ctx) {
 SEC("tracepoint/syscalls/sys_exit_sched_setaffinity")
 int handle_sys_exit_sched_setaffinity(struct exit_ar_args *ctx) {
   int retval = ctx->ret;
-  u64 ts;
   u64 pid_tgid;
   struct lime_event *event;
+  struct task_struct *target = NULL;
+  struct task_struct *ref_task = NULL;
+  u32 target_pid = 0;
 
-  ts = now();
   pid_tgid = bpf_get_current_pid_tgid();
 
-  __u64 *dst_pidtgid = bpf_map_lookup_elem(&changing, &pid_tgid);
-  if (!dst_pidtgid) {
+  u64 *dst_pid_tgid = bpf_map_lookup_elem(&changing, &pid_tgid);
+  if (!dst_pid_tgid) {
     return -1;
   }
 
-  bpf_map_delete_elem(&changing, &pid_tgid);
+  target_pid = (u32)(*dst_pid_tgid);
+  target = get_target_task(target_pid, pid_tgid, &ref_task);
 
   event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
-  if (!event)
+  if (!event) {
+    bpf_map_delete_elem(&changing, &pid_tgid);
+    release_task(ref_task);
     return -ENOMEM;
+  }
 
-  event->pid_tgid = pid_tgid;
-  event->ts = ts;
+  event->ts = now();
+  event->pid_tgid = *dst_pid_tgid;  
 
   if (!retval) {
     event->ev_type = SCHED_AFFINITY_CHANGE;
@@ -734,7 +1070,19 @@ int handle_sys_exit_sched_setaffinity(struct exit_ar_args *ctx) {
     event->ev_type = SCHED_AFFINITY_CHANGE_FAILED;
   }
 
+  if (target)
+    fill_sched_attr(target, &event->evd.sched_attr);
+  else
+    __builtin_memset(&event->evd.sched_attr, 0, sizeof(event->evd.sched_attr));
+
   submit_event(event);
+
+  if (!retval)
+    emit_affinity_update_event(target);
+
+  release_task(ref_task);
+
+  bpf_map_delete_elem(&changing, &pid_tgid);
 
   return 0;
 }

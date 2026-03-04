@@ -7,7 +7,12 @@ use crate::{
     utils::ThreadId,
 };
 
-use super::{RawClockId, SiCode};
+use super::{types, RawClockId, SiCode};
+
+// Work around bindgen output that flips between i32 and u32 across platforms.
+fn si_code_as_i32(code: SiCode) -> i32 {
+    i32::from_ne_bytes(code.0.to_ne_bytes())
+}
 
 impl Serialize for SiCode {
     fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
@@ -25,7 +30,26 @@ impl Serialize for SiCode {
             SiCode::SI_TKILL => serializer.serialize_unit_variant("", 7, "SI_TKILL"),
             SiCode::SI_DETHREAD => serializer.serialize_unit_variant("", 8, "SI_DETHREAD"),
             SiCode::SI_ASYNCNL => serializer.serialize_unit_variant("", 9, "SI_ASYNCNL"),
-            _ => serializer.serialize_i32(self.0),
+            _ => serializer.serialize_i32(si_code_as_i32(*self)),
+        }
+    }
+}
+
+fn read_sched_policy(attr: &types::lime_sched_attr) -> SchedulingPolicy {
+    unsafe {
+        match attr.policy as i32 {
+            SCHED_DEADLINE => SchedulingPolicy::Deadline {
+                runtime: attr.attrs.dl.runtime,
+                period: attr.attrs.dl.period,
+                deadline: attr.attrs.dl.deadline,
+            },
+            SCHED_FIFO => SchedulingPolicy::Fifo {
+                prio: attr.attrs.rt.prio,
+            },
+            SCHED_RR => SchedulingPolicy::RoundRobin {
+                prio: attr.attrs.rt.prio,
+            },
+            _ => SchedulingPolicy::Other,
         }
     }
 }
@@ -189,7 +213,7 @@ impl From<&RawEvent> for EventData {
 
             EventType::DELIVER_RT_SIGNAL => EventData::RtSigDelivered {
                 signo: unsafe { event.evd.deliver_rt_sig.signo },
-                si_code: unsafe { event.evd.deliver_rt_sig.si_code.0 },
+                si_code: unsafe { si_code_as_i32(event.evd.deliver_rt_sig.si_code) },
             },
             EventType::ENTER_NANOSLEEP => {
                 let mut required_ns = 0;
@@ -266,38 +290,31 @@ impl From<&RawEvent> for EventData {
                 timeout: unsafe { event.evd.enter_semop.timeout },
             },
 
-            EventType::SCHED_PROCESS_FORK => EventData::SchedProcessFork {
-                sched_policy: unsafe {
-                    let attrs = event.evd.sched_attr.attrs;
+            EventType::SCHED_PROCESS_FORK => EventData::SchedProcessFork {},
+            EventType::SCHED_PROCESS_EXIT => EventData::SchedProcessExit {},
+            EventType::SCHED_PROCESS_EXEC => EventData::SchedProcessExec {},
 
-                    match event.evd.sched_attr.policy as i32 {
-                        SCHED_DEADLINE => SchedulingPolicy::Deadline {
-                            runtime: attrs.dl.runtime,
-                            period: attrs.dl.period,
-                            deadline: attrs.dl.deadline,
-                        },
+            EventType::ENTER_SCHED_SETAFFINITY => EventData::EnterSchedSetAffinity {},
+            EventType::SCHED_AFFINITY_CHANGE => EventData::AffinityChange {},
+            EventType::SCHED_AFFINITY_CHANGE_FAILED => EventData::AffinityChangeFailed {},
 
-                        SCHED_FIFO => SchedulingPolicy::Fifo {
-                            prio: attrs.rt.prio,
-                        },
-
-                        SCHED_RR => SchedulingPolicy::RoundRobin {
-                            prio: attrs.rt.prio,
-                        },
-
-                        _ => SchedulingPolicy::Other,
-                    }
-                },
+            EventType::SCHED_POLICY_UPDATE => EventData::SchedPolicyUpdate {
+                sched_policy: read_sched_policy(unsafe { &event.evd.sched_attr }),
             },
-            EventType::SCHED_PROCESS_EXIT => EventData::SchedProcessExit,
-            EventType::SCHED_PROCESS_EXEC => EventData::SchedProcessExec,
 
-            EventType::ENTER_SCHED_SETAFFINITY => EventData::EnterSchedSetAffinity,
-            EventType::SCHED_AFFINITY_CHANGE => EventData::AffinityChange,
-            EventType::SCHED_AFFINITY_CHANGE_FAILED => EventData::AffinityChangeFailed,
+            EventType::PROCESS_INFO_START
+            | EventType::PROCESS_INFO_CMD_CHUNK
+            | EventType::PROCESS_INFO_END => {
+                unreachable!("process info fragments must be handled before conversion")
+            }
 
-            EventType::SCHED_SCHEDULER_CHANGE => EventData::RawSchedulerChange,
-            EventType::SCHED_SCHEDULER_CHANGE_FAILED => EventData::SchedulerChangeFailed,
+            EventType::SCHED_SCHEDULER_CHANGE => EventData::RawSchedulerChange {},
+            EventType::SCHED_SCHEDULER_CHANGE_FAILED => EventData::SchedulerChangeFailed {},
+            EventType::AFFINITY_UPDATE_START
+            | EventType::AFFINITY_UPDATE_CHUNK
+            | EventType::AFFINITY_UPDATE_CHUNK_END => {
+                unreachable!("affinity fragments must be handled before conversion")
+            }
             _ => unreachable!("Unknown event type {}", event.ev_type.0),
         }
     }

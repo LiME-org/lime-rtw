@@ -180,8 +180,15 @@ impl TraceEvent {
     }
 
     pub fn is_process_exit(&self) -> bool {
-        matches!(self.ev, EventData::SchedProcessExit)
+        matches!(self.ev, EventData::SchedProcessExit {})
     }
+}
+
+#[derive(Debug, Serialize, Deserialize, Eq, PartialEq, Clone)]
+pub struct ProcessInfo {
+    pub ppid: Option<u32>,
+    pub comm: Option<String>,
+    pub cmd: Option<String>,
 }
 
 /// Event-specific data.
@@ -347,13 +354,13 @@ pub enum EventData {
     /// current task will end with `SchedulerChange` event, and new one will
     /// start with `SchedulerChanged` event. This event is a pseudo event. It
     /// should not be observed in regular LiME's output.
-    RawSchedulerChange,
+    RawSchedulerChange {},
     /// Last event emitted by a task on scheduler change.
     SchedulerChange {
         sched_policy: SchedulingPolicy,
     },
     /// Emitted on scheduler change failure.
-    SchedulerChangeFailed,
+    SchedulerChangeFailed {},
     /// First event emitted by a task created after succesful scheduler change.
     SchedulerChanged {
         sched_policy: SchedulingPolicy,
@@ -367,20 +374,31 @@ pub enum EventData {
         sched_policy: SchedulingPolicy,
     },
 
-    SchedProcessExit,
-    SchedProcessFork {
-        sched_policy: SchedulingPolicy,
-    },
-    SchedProcessExec,
+    SchedProcessExit {},
 
-    EnterSchedSetAffinity,
+    SchedProcessFork {},
+    SchedProcessExec {},
+
+    EnterSchedSetAffinity {},
 
     /// Last event emitted by a task on processor affinity change.
-    AffinityChange,
-    AffinityChangeFailed,
+    AffinityChange {},
+    AffinityChangeFailed {},
     /// First event emitted by a task created after succesful processor affinity
     /// change.
-    AffinityChanged,
+    AffinityChanged {},
+
+    SchedPolicyUpdate {
+        sched_policy: SchedulingPolicy,
+    },
+
+    AffinityUpdate {
+        cpumask: Option<Vec<u32>>,
+    },
+
+    ProcessInfoUpdate {
+        process_info: Option<ProcessInfo>,
+    },
 
     LimeThrottle,
     LimeThrottleRelease,
@@ -541,7 +559,7 @@ impl From<&EventData> for proto::EventData {
                 sem_id: *sem_id,
                 timeout: *timeout,
             }),
-            EventData::RawSchedulerChange => {
+            EventData::RawSchedulerChange {} => {
                 Event::RawSchedulerChange(proto::RawSchedulerChange {})
             }
             EventData::SchedulerChange { sched_policy } => {
@@ -549,7 +567,7 @@ impl From<&EventData> for proto::EventData {
                     sched_policy: Some(sched_policy.into()),
                 })
             }
-            EventData::SchedulerChangeFailed => {
+            EventData::SchedulerChangeFailed {} => {
                 Event::SchedulerChangeFailed(proto::SchedulerChangeFailed {})
             }
             EventData::SchedulerChanged { sched_policy } => {
@@ -567,21 +585,30 @@ impl From<&EventData> for proto::EventData {
                     sched_policy: Some(sched_policy.into()),
                 })
             }
-            EventData::SchedProcessExit => Event::SchedProcessExit(proto::SchedProcessExit {}),
-            EventData::SchedProcessFork { sched_policy } => {
-                Event::SchedProcessFork(proto::SchedProcessFork {
+            EventData::SchedProcessExit {} => Event::SchedProcessExit(proto::SchedProcessExit {}),
+            EventData::SchedProcessFork {} => Event::SchedProcessFork(proto::SchedProcessFork {}),
+            EventData::SchedProcessExec {} => Event::SchedProcessExec(proto::SchedProcessExec {}),
+            EventData::EnterSchedSetAffinity {} => {
+                Event::EnterSchedSetAffinity(proto::EnterSchedSetAffinity {})
+            }
+            EventData::AffinityChange {} => Event::AffinityChange(proto::AffinityChange {}),
+            EventData::AffinityChangeFailed {} => {
+                Event::AffinityChangeFailed(proto::AffinityChangeFailed {})
+            }
+            EventData::AffinityChanged {} => Event::AffinityChanged(proto::AffinityChanged {}),
+            EventData::ProcessInfoUpdate { process_info } => {
+                Event::ProcessInfoUpdate(proto::ProcessInfoUpdate {
+                    process_info: process_info.as_ref().map(|info| info.into()),
+                })
+            }
+            EventData::SchedPolicyUpdate { sched_policy } => {
+                Event::SchedPolicyUpdate(proto::SchedPolicyUpdate {
                     sched_policy: Some(sched_policy.into()),
                 })
             }
-            EventData::SchedProcessExec => Event::SchedProcessExec(proto::SchedProcessExec {}),
-            EventData::EnterSchedSetAffinity => {
-                Event::EnterSchedSetAffinity(proto::EnterSchedSetAffinity {})
-            }
-            EventData::AffinityChange => Event::AffinityChange(proto::AffinityChange {}),
-            EventData::AffinityChangeFailed => {
-                Event::AffinityChangeFailed(proto::AffinityChangeFailed {})
-            }
-            EventData::AffinityChanged => Event::AffinityChanged(proto::AffinityChanged {}),
+            EventData::AffinityUpdate { cpumask } => Event::AffinityUpdate(proto::AffinityUpdate {
+                cpumask: cpumask.clone().unwrap_or_default(),
+            }),
             EventData::LimeThrottle => Event::LimeThrottle(proto::LimeThrottle {}),
             EventData::LimeThrottleRelease => {
                 Event::LimeThrottleRelease(proto::LimeThrottleRelease {})
@@ -713,11 +740,11 @@ impl From<&proto::event_data::Event> for EventData {
                 sem_id: e.sem_id,
                 timeout: e.timeout,
             },
-            Event::RawSchedulerChange(_) => EventData::RawSchedulerChange,
+            Event::RawSchedulerChange(_) => EventData::RawSchedulerChange {},
             Event::SchedulerChange(e) => EventData::SchedulerChange {
                 sched_policy: e.sched_policy.into(),
             },
-            Event::SchedulerChangeFailed(_) => EventData::SchedulerChangeFailed,
+            Event::SchedulerChangeFailed(_) => EventData::SchedulerChangeFailed {},
             Event::SchedulerChanged(e) => EventData::SchedulerChanged {
                 sched_policy: e.sched_policy.into(),
             },
@@ -727,15 +754,26 @@ impl From<&proto::event_data::Event> for EventData {
             Event::SchedParamsChanged(e) => EventData::SchedParamsChanged {
                 sched_policy: e.sched_policy.into(),
             },
-            Event::SchedProcessExit(_) => EventData::SchedProcessExit,
-            Event::SchedProcessFork(e) => EventData::SchedProcessFork {
+            Event::SchedProcessExit(_) => EventData::SchedProcessExit {},
+            Event::SchedProcessFork(_) => EventData::SchedProcessFork {},
+            Event::SchedProcessExec(_) => EventData::SchedProcessExec {},
+            Event::EnterSchedSetAffinity(_) => EventData::EnterSchedSetAffinity {},
+            Event::AffinityChange(_) => EventData::AffinityChange {},
+            Event::AffinityChangeFailed(_) => EventData::AffinityChangeFailed {},
+            Event::AffinityChanged(_) => EventData::AffinityChanged {},
+            Event::ProcessInfoUpdate(e) => EventData::ProcessInfoUpdate {
+                process_info: e.process_info.as_ref().map(|info| info.into()),
+            },
+            Event::SchedPolicyUpdate(e) => EventData::SchedPolicyUpdate {
                 sched_policy: e.sched_policy.into(),
             },
-            Event::SchedProcessExec(_) => EventData::SchedProcessExec,
-            Event::EnterSchedSetAffinity(_) => EventData::EnterSchedSetAffinity,
-            Event::AffinityChange(_) => EventData::AffinityChange,
-            Event::AffinityChangeFailed(_) => EventData::AffinityChangeFailed,
-            Event::AffinityChanged(_) => EventData::AffinityChanged,
+            Event::AffinityUpdate(e) => EventData::AffinityUpdate {
+                cpumask: if e.cpumask.is_empty() {
+                    None
+                } else {
+                    Some(e.cpumask.clone())
+                },
+            },
             Event::LimeThrottle(_) => EventData::LimeThrottle,
             Event::LimeThrottleRelease(_) => EventData::LimeThrottleRelease,
             Event::LimeStartOfTrace(_) => EventData::LimeStartOfTrace,
@@ -790,6 +828,34 @@ impl From<&proto::SchedulingPolicy> for SchedulingPolicy {
             Some(proto::scheduling_policy::Policy::Other(_)) => SchedulingPolicy::Other,
             Some(proto::scheduling_policy::Policy::Unknown(_)) => SchedulingPolicy::Unknown,
             None => SchedulingPolicy::Unknown,
+        }
+    }
+}
+
+impl From<&ProcessInfo> for proto::ProcessInfo {
+    fn from(info: &ProcessInfo) -> Self {
+        proto::ProcessInfo {
+            ppid: info.ppid.unwrap_or_default(),
+            comm: info.comm.clone().unwrap_or_default(),
+            cmd: info.cmd.clone().unwrap_or_default(),
+        }
+    }
+}
+
+impl From<&proto::ProcessInfo> for ProcessInfo {
+    fn from(info: &proto::ProcessInfo) -> Self {
+        ProcessInfo {
+            ppid: (info.ppid != 0).then_some(info.ppid),
+            comm: if info.comm.is_empty() {
+                None
+            } else {
+                Some(info.comm.clone())
+            },
+            cmd: if info.cmd.is_empty() {
+                None
+            } else {
+                Some(info.cmd.clone())
+            },
         }
     }
 }

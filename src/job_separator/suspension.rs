@@ -7,7 +7,7 @@ use super::{JobSeparation, JobSeparator, Signature};
 fn not_running(event: &TraceEvent) -> bool {
     matches!(
         event.ev,
-        EventData::AffinityChanged
+        EventData::AffinityChanged {}
             | EventData::SchedulerChanged { .. }
             | EventData::SchedMigrateTask { .. }
             | EventData::SchedWaking { .. }

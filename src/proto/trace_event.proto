@@ -46,6 +46,12 @@ message DeadlinePolicy {
 message OtherPolicy {}
 message UnknownPolicy {}
 
+message ProcessInfo {
+    uint32 ppid = 1;
+    string comm = 2;
+    string cmd = 3;
+}
+
 // Matches EventData enum
 message EventData {
     oneof event {
@@ -101,6 +107,9 @@ message EventData {
         LimeThrottleRelease lime_throttle_release = 50;
         LimeStartOfTrace lime_start_of_trace = 51;
         LimeEndOfTrace lime_end_of_trace = 52;
+        ProcessInfoUpdate process_info_update = 53;
+        SchedPolicyUpdate sched_policy_update = 54;
+        AffinityUpdate affinity_update = 55;
     }
 }
 
@@ -273,9 +282,7 @@ message SchedParamsChanged {
 
 message SchedProcessExit {}
 
-message SchedProcessFork {
-    SchedulingPolicy sched_policy = 1;
-}
+message SchedProcessFork {}
 
 message SchedProcessExec {}
 
@@ -286,6 +293,18 @@ message AffinityChange {}
 message AffinityChangeFailed {}
 
 message AffinityChanged {}
+
+message ProcessInfoUpdate {
+    ProcessInfo process_info = 1;
+}
+
+message SchedPolicyUpdate {
+    SchedulingPolicy sched_policy = 1;
+}
+
+message AffinityUpdate {
+    repeated uint32 cpumask = 1;
+}
 
 message LimeThrottle {}
 

@@ -17,6 +17,10 @@ use std::convert::TryFrom;
 use std::error::Error as StdError;
 
 use crate::events::{EventData, SchedulingPolicy, TraceEvent};
+use crate::tracer::assembler::{
+    AffinityAssemblerAction, AffinityUpdateAssembler, ProcessInfoAssembler,
+    ProcessInfoAssemblerAction,
+};
 use std::collections::{HashMap, VecDeque};
 use std::mem::MaybeUninit;
 use std::sync::atomic::AtomicBool;
@@ -365,13 +369,15 @@ impl BPFTracer<'_> {
             let mut limiter = BPFSourceRateLimiter::new(limiter_period, limiter_budget, throttled);
             let _ = limiter.start();
 
+            let mut process_info = ProcessInfoAssembler::new();
+            let mut affinity = AffinityUpdateAssembler::default();
             let mut builder = RingBufferBuilder::new();
             _ = builder
                 .add(&skel.maps.events, move |d: &[u8]| {
                     let raw_event = Self::parse_raw_event(d);
-                    let event = TraceEvent::from(&raw_event);
-
-                    match limiter.is_block_listed(&event) {
+                    let mut dispatch_event = |event: TraceEvent| match limiter
+                        .is_block_listed(&event)
+                    {
                         RateLimiterResult::Ok => send_batched(event),
                         RateLimiterResult::Throttled => {}
                         RateLimiterResult::ThrottleRelease => {
@@ -395,7 +401,33 @@ impl BPFTracer<'_> {
                             send_batched(event);
                             send_batched(e2);
                         }
+                    };
+
+                    // Aggregate multi-part process/affinity fragments before dispatching
+                    // because the ringbuffer delivers each fragment as its own event.
+                    // If an assembler consumes the raw event (or emits a completed one),
+                    // return 0 to skip further handling; NotHandled means it's not a
+                    // fragment of these multi-part types, so we fall through.
+                    match process_info.handle(&raw_event) {
+                        ProcessInfoAssemblerAction::Completed(event) => {
+                            dispatch_event(event);
+                            return 0;
+                        }
+                        ProcessInfoAssemblerAction::Consumed => return 0,
+                        ProcessInfoAssemblerAction::NotHandled => {}
                     }
+
+                    match affinity.handle(&raw_event) {
+                        AffinityAssemblerAction::Completed(event) => {
+                            dispatch_event(event);
+                            return 0;
+                        }
+                        AffinityAssemblerAction::Consumed => return 0,
+                        AffinityAssemblerAction::NotHandled => {}
+                    }
+
+                    let event = TraceEvent::from(&raw_event);
+                    dispatch_event(event);
 
                     0
                 })
@@ -572,14 +604,15 @@ impl<I> TraceEvents<I> {
 
     fn handle_event(&mut self, event: TraceEvent) -> TraceEvent {
         match event.ev {
-            EventData::AffinityChange => {
+            EventData::AffinityChange {} => {
                 let next = TraceEvent {
                     ts: event.ts,
                     id: event.id,
-                    ev: EventData::AffinityChanged,
+                    ev: EventData::AffinityChanged {},
                 };
 
-                self.backlog.push_back(next);
+                // Emit AffinityChanged immediately after AffinityChange by queuing it next.
+                self.backlog.push_front(next);
 
                 event
             }
@@ -594,41 +627,39 @@ impl<I> TraceEvents<I> {
                 event
             }
 
-            EventData::RawSchedulerChange => {
-                if let Some((old_policy, sched_policy)) = self.pending_policy.remove(&event.id.pid)
+            EventData::RawSchedulerChange {} => {
+                let ev = if let Some((old_policy, sched_policy)) =
+                    self.pending_policy.remove(&event.id.pid)
                 {
-                    let next = TraceEvent {
+                    let policy_changed = sched_policy.policy_num() != old_policy;
+                    let follow_up = if policy_changed {
+                        EventData::SchedulerChanged { sched_policy }
+                    } else {
+                        EventData::SchedParamsChanged { sched_policy }
+                    };
+
+                    // Emit the follow-up change event immediately after this raw event.
+                    self.backlog.push_front(TraceEvent {
                         ts: event.ts,
                         id: event.id,
-                        ev: if sched_policy.policy_num() == old_policy {
-                            EventData::SchedParamsChanged { sched_policy }
-                        } else {
-                            EventData::SchedulerChanged { sched_policy }
-                        },
-                    };
+                        ev: follow_up,
+                    });
 
-                    self.backlog.push_back(next);
-
-                    let mut ret = event;
-                    ret.ev = if sched_policy.policy_num() == old_policy {
-                        EventData::SchedParamsChange { sched_policy }
-                    } else {
+                    if policy_changed {
                         EventData::SchedulerChange { sched_policy }
-                    };
+                    } else {
+                        EventData::SchedParamsChange { sched_policy }
+                    }
+                } else {
+                    EventData::SchedulerChanged {
+                        sched_policy: SchedulingPolicy::Unknown,
+                    }
+                };
 
-                    return ret;
-                }
-
-                let sched_policy = SchedulingPolicy::Unknown;
-
-                TraceEvent {
-                    ts: event.ts,
-                    id: event.id,
-                    ev: EventData::SchedulerChanged { sched_policy },
-                }
+                TraceEvent { ev, ..event }
             }
 
-            EventData::SchedulerChangeFailed => {
+            EventData::SchedulerChangeFailed { .. } => {
                 self.pending_policy.remove(&event.id.pid);
 
                 event
@@ -646,18 +677,24 @@ where
     type Item = TraceEvent;
 
     fn next(&mut self) -> Option<Self::Item> {
-        let event = self.backlog.pop_front();
-
-        if event.is_some() {
-            return event;
-        }
-
-        self.iter.next().and_then(|batch| {
-            let mut iter = batch.into_iter();
-            let event = iter.next().map(|e| self.handle_event(e));
-            self.backlog.extend(iter);
+        // Try to get an event from the backlog first
+        let event = if let Some(event) = self.backlog.pop_front() {
             event
-        })
+        } else {
+            // If backlog is empty, fetch the next batch
+            let batch = self.iter.next()?;
+            let mut batch_iter = batch.into_iter();
+
+            // Take the first event from the batch
+            let first = batch_iter.next()?;
+
+            // Store remaining events in the backlog for later
+            self.backlog.extend(batch_iter);
+
+            first
+        };
+
+        Some(self.handle_event(event))
     }
 }
 
@@ -810,4 +847,5 @@ impl EventSource for BPFSource<'_> {
     }
 }
 
+mod assembler;
 pub mod dd;

@@ -24,6 +24,16 @@ LiME has been tested and is supported on Linux kernel versions from 5.15 to 6.12
 
 The tool requires a Linux kernel with eBPF features enabled. Additionally, the kernel must be compiled with `CONFIG_DEBUG_INFO_BTF=y` as LiME utilizes eBPF's CO-RE (Compile Once - Run Everywhere) feature. Without this configuration, the eBPF programs will fail to load.
 
+### Target kernel version at compile time
+
+During compilation the build script determines which kernel version to target for the eBPF program. By default it uses the host kernel reported by `uname -r`, but you can override it when compiling on one machine for another kernel (e.g., cross-building) by exporting `LIME_TARGET_KERNEL_VERSION`:
+
+```shell
+LIME_TARGET_KERNEL_VERSION=5.15.0 cargo build --release
+```
+
+The variable accepts values of the form `major.minor[.patch]` (for example `5.15` or `6.6.32`). If the variable is unset or empty and the host kernel cannot be detected, the build will fail with an error that asks you to provide the variable explicitly.
+
 ## Building and running the tool
 
 The tool is built like any rust project with `cargo build`.
@@ -76,4 +86,3 @@ directory can be set to the trace folder with the `--inplace` flag.
 ```shell
 sudo target/debug/lime-rtw extract --from <path_to_trace> --inplace
 ```
-
