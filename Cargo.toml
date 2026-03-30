@@ -14,7 +14,7 @@ signal-hook = "0.4.3"
 sysinfo = "0.38.0"
 serde = { version = "1.0.147", features = ["derive"] }
 serde_json = "1.0"
-time = { version = "0.3.46", features = ["formatting", "local-offset", "macros", "parsing"]}
+time = { version = "0.3.47", features = ["formatting", "local-offset", "macros", "parsing"]}
 serde-hex = "0.1.0"
 nix = { version = "0.31", features = ["time", "signal", "process", "sched"] }
 glob = "0.3.0"
