@@ -251,7 +251,7 @@ impl EventSource for TraceReader {
 
         for (task_id, event) in rx.iter() {
             if should_process_event(&event, ctx) {
-                processor.consume_event(&task_id, event, ctx);
+                processor.consume_event(task_id, event, ctx);
             }
         }
 

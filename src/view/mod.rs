@@ -117,7 +117,7 @@ impl EventProcessor for ViewProcessor {
         Ok(())
     }
 
-    fn consume_event(&mut self, _task_id: &TaskId, _event: TraceEvent, _ctx: &LimeContext) {}
+    fn consume_event(&mut self, _task_id: TaskId, _event: TraceEvent, _ctx: &LimeContext) {}
 
     fn finalize<S: crate::EventSource>(&mut self, _src: &S, ctx: &LimeContext) -> Result<()> {
         self.run(ctx)

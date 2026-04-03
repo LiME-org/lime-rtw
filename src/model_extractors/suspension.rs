@@ -404,7 +404,7 @@ mod tests {
         let mut timeline = Timeline::new();
 
         for e in EXAMPLE_CLOCK_NANOSLEEP_1.iter() {
-            timeline.update(&e);
+            timeline.update(e);
         }
 
         let j = Job {

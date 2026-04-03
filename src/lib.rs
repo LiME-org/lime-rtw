@@ -82,7 +82,7 @@ pub trait EventProcessor {
     fn post_load_init(&mut self, ctx: &LimeContext) -> Result<()>;
 
     /// Process an event
-    fn consume_event(&mut self, task_id: &TaskId, event: TraceEvent, ctx: &LimeContext);
+    fn consume_event(&mut self, task_id: TaskId, event: TraceEvent, ctx: &LimeContext);
 
     /// Destructor function
     fn finalize<S: EventSource>(&mut self, src: &S, ctx: &LimeContext) -> Result<()>;

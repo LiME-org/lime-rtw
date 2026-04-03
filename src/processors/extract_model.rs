@@ -36,8 +36,13 @@ impl TaskModelExtractor {
         self.extractors.items()
     }
 
-    fn write_thread_infos<W: Write>(&self, writer: &mut W, tinfo: &TaskInfos) -> Result<()> {
-        serde_json::to_writer_pretty(writer, &tinfo)?;
+    fn write_thread_infos<W: Write>(
+        &self,
+        writer: &mut W,
+        tinfo: &TaskInfos,
+        ctx: &LimeContext,
+    ) -> Result<()> {
+        tinfo.write_pretty(writer, ctx.time_reference.as_ref())?;
 
         Ok(())
     }
@@ -60,6 +65,7 @@ impl TaskModelExtractor {
         task_id: &TaskId,
         extractor: &ThreadTaskModelExtractor,
         infos: &Option<TaskInfos>,
+        ctx: &LimeContext,
     ) -> Result<(bool, bool)> {
         let mut info_file_created = false;
         let mut model_file_created = false;
@@ -67,7 +73,7 @@ impl TaskModelExtractor {
         if let Some(infos) = infos {
             if let Ok(mut f_infos) = self.output_directory.create_infos_file(task_id) {
                 info_file_created = true;
-                _ = self.write_thread_infos(&mut f_infos, infos);
+                _ = self.write_thread_infos(&mut f_infos, infos, ctx);
             }
         }
 
@@ -114,9 +120,9 @@ impl EventProcessor for TaskModelExtractor {
         Ok(())
     }
 
-    fn consume_event(&mut self, task_id: &TaskId, event: TraceEvent, ctx: &LimeContext) {
+    fn consume_event(&mut self, task_id: TaskId, event: TraceEvent, ctx: &LimeContext) {
         self.extractors
-            .get_or_new(task_id, || ThreadTaskModelExtractor::new(ctx))
+            .get_or_new(&task_id, || ThreadTaskModelExtractor::new(ctx))
             .consume_event(event, ctx)
     }
 
@@ -160,7 +166,8 @@ impl EventProcessor for TaskModelExtractor {
                 None
             };
 
-            if let Ok((info_created, model_created)) = self.report_task(&task_id, extractor, &infos)
+            if let Ok((info_created, model_created)) =
+                self.report_task(&task_id, extractor, &infos, ctx)
             {
                 if info_created || model_created {
                     total_files += 1;

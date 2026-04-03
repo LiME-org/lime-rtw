@@ -12,7 +12,7 @@ use crate::{
 #[cfg(target_os = "linux")]
 use crate::cli::EventSourceType;
 
-use anyhow::{Ok, Result};
+use anyhow::Result;
 use std::collections::HashSet;
 
 pub struct TraceWriter {
@@ -50,7 +50,7 @@ impl TraceWriter {
         writer.write(event).unwrap()
     }
 
-    fn close<S: EventSource>(&mut self, src: &S) {
+    fn close<S: EventSource>(&mut self, src: &S, ctx: &LimeContext) {
         // dump task metadata
         for task_id in self.thread_events_dumpers.keys() {
             if let Some(tinfo) = src.get_task_info(*task_id) {
@@ -59,7 +59,7 @@ impl TraceWriter {
                 let filename = format!("{task_id}.infos.json");
                 self.written_files.insert(filename);
 
-                serde_json::to_writer_pretty(f, &tinfo).unwrap();
+                tinfo.write_pretty(f, ctx.time_reference.as_ref()).unwrap();
             }
         }
 
@@ -123,12 +123,12 @@ impl EventProcessor for TraceWriter {
         Ok(())
     }
 
-    fn consume_event(&mut self, task_id: &TaskId, event: TraceEvent, _ctx: &LimeContext) {
-        self.write_event(task_id, &event);
+    fn consume_event(&mut self, task_id: TaskId, event: TraceEvent, _ctx: &LimeContext) {
+        self.write_event(&task_id, &event);
     }
 
-    fn finalize<S: EventSource>(&mut self, src: &S, _ctx: &LimeContext) -> Result<()> {
-        self.close(src);
+    fn finalize<S: EventSource>(&mut self, src: &S, ctx: &LimeContext) -> Result<()> {
+        self.close(src, ctx);
 
         eprintln!("Results saved in {}.", self.output_dir.path());
 

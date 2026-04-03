@@ -83,7 +83,12 @@ impl TaskModelJSONWriter {
         }
     }
 
-    fn write_thread_infos(&mut self, task_id: &TaskId, tinfo: &TaskInfos) -> Result<()> {
+    fn write_thread_infos(
+        &mut self,
+        task_id: &TaskId,
+        tinfo: &TaskInfos,
+        ctx: &LimeContext,
+    ) -> Result<()> {
         let mut b = PathBuf::from(self.base.clone());
 
         let filename = format!("{}.infos.json", task_id);
@@ -97,7 +102,7 @@ impl TaskModelJSONWriter {
                 .write(true)
                 .open(b.as_path())?;
 
-            serde_json::to_writer_pretty(f, &tinfo)?;
+            tinfo.write_pretty(f, ctx.time_reference.as_ref())?;
         }
 
         Ok(())
@@ -148,7 +153,7 @@ impl TaskModelJSONWriter {
                     // report only real-time tasks.
                     continue;
                 }
-                self.write_thread_infos(task_id, &tinfo)?;
+                self.write_thread_infos(task_id, &tinfo, ctx)?;
             } else if !ctx.trace_best_effort {
                 // We don't know what it is, and we want to report
                 // only (confirmed) real-time tasks => let's ignore
@@ -175,4 +180,3 @@ impl TaskModelJSONWriter {
         Ok(())
     }
 }
-

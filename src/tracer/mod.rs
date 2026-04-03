@@ -3,8 +3,7 @@
 //!
 
 use crate::context::LimeContext;
-use crate::task::TaskInfos;
-use crate::task::{mapper::TaskMapper, TaskId};
+use crate::task::{mapper::TaskMapper, TaskId, TaskInfos};
 use crate::utils::any_as_u8_slice_mut;
 use crate::{EventProcessor, EventSource};
 use anyhow::{Error, Result};
@@ -21,7 +20,8 @@ use crate::tracer::assembler::{
     AffinityAssemblerAction, AffinityUpdateAssembler, ProcessInfoAssembler,
     ProcessInfoAssemblerAction,
 };
-use std::collections::{HashMap, VecDeque};
+use rustc_hash::FxHashMap;
+use std::collections::HashMap;
 use std::mem::MaybeUninit;
 use std::sync::atomic::AtomicBool;
 use std::thread::JoinHandle;
@@ -583,22 +583,24 @@ impl BPFTracer<'_> {
     }
 
     pub fn events(&self) -> impl Iterator<Item = TraceEvent> + '_ {
-        TraceEvents::new(self.rx.as_ref().unwrap().iter(), self.tx_batch_size)
+        TraceEvents::new(self.rx.as_ref().unwrap().iter())
     }
 }
 
 struct TraceEvents<I> {
     iter: I,
-    backlog: VecDeque<TraceEvent>,
-    pending_policy: HashMap<u32, (i32, SchedulingPolicy)>,
+    current_batch: std::vec::IntoIter<TraceEvent>,
+    pending_event: Option<TraceEvent>,
+    pending_policy: FxHashMap<u32, (i32, SchedulingPolicy)>,
 }
 
 impl<I> TraceEvents<I> {
-    pub fn new(iter: I, capacity: usize) -> Self {
+    pub fn new(iter: I) -> Self {
         Self {
             iter,
-            backlog: VecDeque::with_capacity(capacity),
-            pending_policy: HashMap::new(),
+            current_batch: Vec::new().into_iter(),
+            pending_event: None,
+            pending_policy: FxHashMap::default(),
         }
     }
 
@@ -612,7 +614,7 @@ impl<I> TraceEvents<I> {
                 };
 
                 // Emit AffinityChanged immediately after AffinityChange by queuing it next.
-                self.backlog.push_front(next);
+                self.pending_event = Some(next);
 
                 event
             }
@@ -639,7 +641,7 @@ impl<I> TraceEvents<I> {
                     };
 
                     // Emit the follow-up change event immediately after this raw event.
-                    self.backlog.push_front(TraceEvent {
+                    self.pending_event = Some(TraceEvent {
                         ts: event.ts,
                         id: event.id,
                         ev: follow_up,
@@ -677,24 +679,17 @@ where
     type Item = TraceEvent;
 
     fn next(&mut self) -> Option<Self::Item> {
-        // Try to get an event from the backlog first
-        let event = if let Some(event) = self.backlog.pop_front() {
-            event
-        } else {
-            // If backlog is empty, fetch the next batch
-            let batch = self.iter.next()?;
-            let mut batch_iter = batch.into_iter();
+        if let Some(event) = self.pending_event.take() {
+            return Some(event);
+        }
 
-            // Take the first event from the batch
-            let first = batch_iter.next()?;
+        loop {
+            if let Some(event) = self.current_batch.next() {
+                return Some(self.handle_event(event));
+            }
 
-            // Store remaining events in the backlog for later
-            self.backlog.extend(batch_iter);
-
-            first
-        };
-
-        Some(self.handle_event(event))
+            self.current_batch = self.iter.next()?.into_iter();
+        }
     }
 }
 
@@ -833,9 +828,10 @@ impl EventSource for BPFSource<'_> {
         ctx: &LimeContext,
     ) -> Result<()> {
         for event in self.tracer.events() {
-            if let Some(task_id) = self.task_mapper.find_task_id(&event) {
-                processor.consume_event(&task_id, event, ctx);
-            }
+            let Some(task_id) = self.task_mapper.find_task_id(&event) else {
+                continue;
+            };
+            processor.consume_event(task_id, event, ctx);
         }
 
         self.exit_status = self.tracer.join_children()?;
@@ -843,7 +839,7 @@ impl EventSource for BPFSource<'_> {
     }
 
     fn get_task_info(&self, task_id: TaskId) -> Option<TaskInfos> {
-        self.task_mapper.get_task_infos(task_id).cloned()
+        self.task_mapper.get_task_infos(task_id)
     }
 }
 

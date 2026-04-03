@@ -155,10 +155,10 @@ impl EventProcessor for JobExtractor {
         Ok(())
     }
 
-    fn consume_event(&mut self, task_id: &TaskId, event: TraceEvent, _ctx: &LimeContext) {
+    fn consume_event(&mut self, task_id: TaskId, event: TraceEvent, _ctx: &LimeContext) {
         let e = self
             .task_job_extractors
-            .get_or_new(task_id, TaskJobExtractor::new);
+            .get_or_new(&task_id, TaskJobExtractor::new);
         e.consume_event(event);
     }
 

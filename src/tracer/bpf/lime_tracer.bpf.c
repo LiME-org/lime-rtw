@@ -879,7 +879,7 @@ static inline int on_ret_change_scheduler(void *ctx, int retval) {
 
   submit_event(event);
 
-  if (!retval) {
+  if (!retval && target && !filter_out_task(target)) {
     emit_process_info_event(target);
     emit_affinity_update_event(target);
   }
@@ -1006,7 +1006,7 @@ int handle_sys_enter_sched_setaffinity(struct enter_setaffinity_args *ctx) {
   pid_tgid = bpf_get_current_pid_tgid();
   prepare_sched_target(ctx->pid, pid_tgid, &target_ctx);
 
-  if (target_ctx.same_task && target_ctx.task && filter_out_task(target_ctx.task)) {
+  if (target_ctx.task && filter_out_task(target_ctx.task)) {
     release_task(target_ctx.ref_task);
     return 0;
   }
@@ -1054,6 +1054,12 @@ int handle_sys_exit_sched_setaffinity(struct exit_ar_args *ctx) {
   target_pid = (u32)(*dst_pid_tgid);
   target = get_target_task(target_pid, pid_tgid, &ref_task);
 
+  if (target && filter_out_task(target)) {
+    bpf_map_delete_elem(&changing, &pid_tgid);
+    release_task(ref_task);
+    return 0;
+  }
+
   event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
   if (!event) {
     bpf_map_delete_elem(&changing, &pid_tgid);
@@ -1062,7 +1068,7 @@ int handle_sys_exit_sched_setaffinity(struct exit_ar_args *ctx) {
   }
 
   event->ts = now();
-  event->pid_tgid = *dst_pid_tgid;  
+  event->pid_tgid = *dst_pid_tgid;
 
   if (!retval) {
     event->ev_type = SCHED_AFFINITY_CHANGE;
