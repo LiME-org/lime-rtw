@@ -816,6 +816,13 @@ name = "libc"
 version = "0.2.180"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "bcc35a38544a891a5f7c865aca548a982ccb3b8650a5b06d0fd33a10283c56fc"
+[[package]]
+name = "lime-model-extractors"
+version = "0.1.0"
+source = "git+https://github.com/LiME-org/lime-model-extractors#84b52720ebfbedb28768c242dd9d5fbbf145f999"
+dependencies = [
+ "thiserror 2.0.18",
+]
 
 [[package]]
 name = "lime-rtw"
@@ -830,6 +837,7 @@ dependencies = [
  "libbpf-cargo",
  "libbpf-rs",
  "libc",
+ "lime-model-extractors",
  "min-max-heap",
  "nc",
  "nix 0.31.1",

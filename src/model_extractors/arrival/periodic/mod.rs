@@ -45,12 +45,6 @@ impl PeriodExtractor {
             InnerPeriodExtractor::OnRelease(ref mut e) => e.update(job),
         }
     }
-
-    pub fn flush(&mut self) {
-        if let InnerPeriodExtractor::OnRelease(ref mut e) = self.inner {
-            e.analyse_batch_and_clear()
-        }
-    }
 }
 
 impl ArrivalModelExtractor for PeriodExtractor {

@@ -4,12 +4,9 @@ use std::borrow::Cow;
 
 use serde::Serialize;
 
-mod arrival_curve;
 pub mod periodic;
-mod sporadic;
-
-pub type ArrivalCurve = arrival_curve::ArrivalCurve;
-pub type Sporadic = sporadic::Sporadic;
+pub mod sporadic;
+pub type ArrivalCurve = sporadic::Sporadic;
 
 /// Arrival model extractors output.
 ///
@@ -27,7 +24,7 @@ pub enum ArrivalModel<'a> {
 
     /// Sporadic arrivals.
     Sporadic {
-        /// Minimal interarrival time. Guaranteed to be stricly positive.
+        /// Minimal interarrival time. Guaranteed to be strictly positive.
         mit: u64,
     },
 

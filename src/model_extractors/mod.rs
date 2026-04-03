@@ -1,10 +1,9 @@
 use self::arrival::periodic::PeriodExtractor;
-use self::arrival::ArrivalCurve;
 use self::event_rate::EventRate;
 use self::rbf::RbfExtractor;
 use self::suspension::BagOfSegmentedSelfSuspension;
 use self::{
-    arrival::{ArrivalModel, ArrivalModelExtractor, Sporadic},
+    arrival::{sporadic::Sporadic, ArrivalModel, ArrivalModelExtractor},
     execution::ExecutionTime,
     job_count::JobCounter,
     suspension::DynamicSelfSuspension,
@@ -33,7 +32,6 @@ struct JobSeparatorExtractors {
     // pub segmented_self_suspension: SegementedSelfSuspension,
     pub count: JobCounter,
     pub periodic: PeriodExtractor,
-    pub arrival_curve: ArrivalCurve,
     pub sporadic: Sporadic,
 }
 
@@ -45,8 +43,7 @@ impl JobSeparatorExtractors {
             bsss: BagOfSegmentedSelfSuspension::new(),
             // segmented_self_suspension: SegementedSelfSuspension::new(),
             count: JobCounter::new(),
-            arrival_curve: ArrivalCurve::new(ctx.arrival_curve_max_len),
-            sporadic: Sporadic::new(),
+            sporadic: Sporadic::new(ctx.arrival_curve_max_len),
             periodic: PeriodExtractor::from_job_separator(sep, ctx),
         }
     }
@@ -56,19 +53,18 @@ impl JobSeparatorExtractors {
         self.suspension.update(timeline, job);
         self.bsss.update(timeline, job);
         self.count.update(job);
-        self.arrival_curve.update(job);
-        self.sporadic.update(timeline, job);
+        self.sporadic.update(job);
         self.periodic.update(job);
     }
 
     pub fn arrival_models(&self) -> Vec<ArrivalModel<'_>> {
         let mut ret = vec![];
 
-        if let Some(c) = self.arrival_curve.extract() {
+        if let Some(c) = self.sporadic.extract_arrival_curve() {
             ret.push(c)
         }
 
-        if let Some(m) = self.sporadic.extract() {
+        if let Some(m) = self.sporadic.extract_sporadic() {
             ret.push(m)
         }
 
@@ -77,10 +73,6 @@ impl JobSeparatorExtractors {
         }
 
         ret
-    }
-
-    pub fn flush(&mut self) {
-        self.periodic.flush();
     }
 }
 
@@ -139,13 +131,9 @@ impl ThreadTaskModelExtractor<'_> {
         self.rbf.is_empty() && self.job_separators_extractors.is_empty()
     }
 
-    /// Flush all the contained extractor. This forces buffered extractors to
-    /// handle all buffered events.
+    /// Flush buffered extractors.
     pub fn flush(&mut self) {
         self.rbf.flush();
-        for e in self.job_separators_extractors.values_mut() {
-            e.flush();
-        }
     }
 
     /// Returns true if models should be outputted for this task.

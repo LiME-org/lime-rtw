@@ -25,6 +25,7 @@ duration-str = "0.18.0"
 index_list = "0.3"
 prost = "0.14"
 prost-types = "0.14"
+lime-model-extractors = { git = "https://github.com/LiME-org/lime-model-extractors" }
 # TUI dependencies
 crossterm = "0.29"
 tui = { package = "ratatui", version = "0.30.0" }
