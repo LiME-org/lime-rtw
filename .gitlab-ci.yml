@@ -11,6 +11,10 @@
 # https://hub.docker.com/r/library/rust/tags/
 image: "rust:latest"
 
+stages:
+  - build
+  - bench
+
 # Optional: Pick zero or more services to be used on all builds.
 # Only needed when using a docker container to run your tests in.
 # Check out: https://docs.gitlab.com/ee/ci/services/index.html
@@ -23,7 +27,7 @@ image: "rust:latest"
 # You will often need this when you (or any of your dependencies) depends on C code.
 before_script:
    - apt-get update -yqq
-   - apt-get install -yqq --no-install-recommends build-essential clang libelf-dev zlib1g-dev pkg-config libbpf-dev protobuf-compiler
+   - apt-get install -yqq --no-install-recommends build-essential clang curl libelf-dev zlib1g-dev pkg-config libbpf-dev protobuf-compiler
 
 # Use cargo to test the project
 test:cargo:
@@ -39,3 +43,92 @@ test:cargo:
     paths:
       - target/*/lime-rtw
     expire_in: 1 hour
+
+bench:extract:
+  stage: bench
+  variables:
+    BENCH_SECURE_FILE: "cyclictest.tar.gz"
+    BENCH_RUNS: "10"
+    BENCH_WARMUP: "1"
+    SECURE_FILES_DOWNLOAD_PATH: "./target/benchmarks/extract/workdir/secure"
+  script:
+    - rustc --version && cargo --version
+    - rustup component add rustfmt clippy
+    - cargo install --locked hyperfine
+    - cargo build --release
+    - |
+      set -euo pipefail
+      repo_root="$CI_PROJECT_DIR"
+      results_dir="$repo_root/target/benchmarks/extract"
+      work_root="$results_dir/workdir"
+      secure_dir="$repo_root/$SECURE_FILES_DOWNLOAD_PATH"
+      unpack_root="$work_root/unpacked"
+      download_path="$secure_dir/$BENCH_SECURE_FILE"
+      input_dir="$work_root/input"
+      binary="$repo_root/target/release/lime-rtw"
+      hyperfine_json="$results_dir/hyperfine.json"
+      summary_md="$results_dir/summary.md"
+
+      mkdir -p "$results_dir"
+      rm -rf "$work_root"
+      mkdir -p "$secure_dir" "$unpack_root"
+
+      curl --silent --show-error "https://gitlab.com/gitlab-org/incubation-engineering/mobile-devops/download-secure-files/-/raw/main/installer" | bash
+
+      test -f "$download_path" || (echo "Secure file not found after download: $download_path" >&2; ls -la "$secure_dir" >&2; exit 1)
+
+      tar -xzf "$download_path" -C "$unpack_root"
+
+      mapfile -t extracted_dirs < <(find "$unpack_root" -mindepth 1 -maxdepth 1 -type d | sort)
+      if [ "${#extracted_dirs[@]}" -ne 1 ]; then
+        echo "Expected $BENCH_SECURE_FILE to unpack into exactly one top-level directory, found ${#extracted_dirs[@]}." >&2
+        find "$unpack_root" -mindepth 1 -maxdepth 2 -print >&2
+        exit 1
+      fi
+      trace_dir="${extracted_dirs[0]}"
+
+      prepare_cmd=$(printf "rm -rf %q && mkdir -p %q && cp -R %q/. %q/" \
+        "$input_dir" "$input_dir" "$trace_dir" "$input_dir")
+      bench_cmd=$(printf "%q extract --from %q --inplace" "$binary" "$input_dir")
+
+      hyperfine \
+        --warmup "$BENCH_WARMUP" \
+        --runs "$BENCH_RUNS" \
+        --export-json "$hyperfine_json" \
+        --show-output \
+        --prepare "$prepare_cmd" \
+        "$bench_cmd"
+
+      python3 - "$hyperfine_json" "$trace_dir" "$BENCH_SECURE_FILE" "$BENCH_RUNS" "$BENCH_WARMUP" > "$summary_md" <<'PY'
+      import json
+      import statistics
+      import sys
+
+      json_path = sys.argv[1]
+      trace_dir = sys.argv[2]
+      secure_file = sys.argv[3]
+      runs = sys.argv[4]
+      warmup = sys.argv[5]
+
+      with open(json_path, "r", encoding="utf-8") as fh:
+          data = json.load(fh)
+      result = data["results"][0]
+      times = result["times"]
+
+      print("# Extract Benchmark")
+      print()
+      print(f"- Trace directory: `{trace_dir}`")
+      print(f"- Secure file: `{secure_file}`")
+      print(f"- Command: `{result['command']}`")
+      print(f"- Runs: `{runs}`")
+      print(f"- Warmup runs: `{warmup}`")
+      print()
+      print("| Metric | Seconds |")
+      print("| --- | ---: |")
+      print(f"| Mean | {result['mean']:.6f} |")
+      print(f"| Median | {statistics.median(times):.6f} |")
+      print(f"| Stddev | {result['stddev']:.6f} |")
+      print(f"| Min | {min(times):.6f} |")
+      print(f"| Max | {max(times):.6f} |")
+      PY
+      cat "$summary_md"

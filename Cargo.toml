@@ -39,3 +39,8 @@ libbpf-cargo = "0.26"
 
 [build-dependencies]
 prost-build = "0.14"
+
+[profile.bench]
+inherits = "release"
+debug = true
+strip = "none"
