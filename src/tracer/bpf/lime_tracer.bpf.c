@@ -201,10 +201,14 @@ static inline void fill_affinity_mask(struct task_struct *t,
   bpf_core_read(mask, sizeof(__u64) * CPUMASK_U64_COUNT, &t->cpus_mask.bits[0]);
 
   bpf_core_read(&cpu_count, sizeof(cpu_count), &t->nr_cpus_allowed);
+
+  /* CPUMASK_U64_COUNT counts u64 words, so * 64 is the number of CPU bits
+   * this fixed mask can represent. If cpu_count covers the whole buffer, there
+   * is nothing useful to clip inside it. */
   if (cpu_count <= 0 || cpu_count >= (CPUMASK_U64_COUNT * 64))
     return;
 
-  /* nr_cpus_allowed is a set-bit budget, not a bit-index limit. Keep the
+  /* nr_cpus_allowed is a set-bit budget, not a bit-index limit: keep the
    * lowest cpu_count set bits so sparse masks survive while stale tail bits are
    * clipped. */
   remaining_cpus = cpu_count;
