@@ -192,32 +192,51 @@ static inline void fill_sched_attr(struct task_struct *t,
 
 static inline void fill_affinity_mask(struct task_struct *t,
                                       __u64 mask[CPUMASK_U64_COUNT]) {
+  int cpu_count = 0;
+  __u32 remaining_cpus;
+
   if (!t || !mask)
     return;
 
-  int cpu_count = 0;
+  bpf_core_read(mask, sizeof(__u64) * CPUMASK_U64_COUNT, &t->cpus_mask.bits[0]);
+
   bpf_core_read(&cpu_count, sizeof(cpu_count), &t->nr_cpus_allowed);
-  if (cpu_count <= 0 || cpu_count > (CPUMASK_U64_COUNT * 64))
-    cpu_count = CPUMASK_U64_COUNT * 64;
+  if (cpu_count <= 0 || cpu_count >= (CPUMASK_U64_COUNT * 64))
+    return;
 
-#pragma unroll
+  /* nr_cpus_allowed is a set-bit budget, not a bit-index limit. Keep the
+   * lowest cpu_count set bits so sparse masks survive while stale tail bits are
+   * clipped. */
+  remaining_cpus = cpu_count;
+
   for (int i = 0; i < CPUMASK_U64_COUNT; i++) {
-    unsigned long word = 0;
-    int bit_base = i * 64;
-
-    if (bit_base >= cpu_count) {
+    if (remaining_cpus == 0) {
       mask[i] = 0;
       continue;
     }
 
-    bpf_core_read(&word, sizeof(word), &t->cpus_mask.bits[i]);
-    int bits_remaining = cpu_count - bit_base;
-    if (bits_remaining < 64) {
-      unsigned long mask = (1UL << bits_remaining) - 1;
-      word &= mask;
+    __u32 set_bits = __builtin_popcountll(mask[i]);
+    if (set_bits <= remaining_cpus) {
+      remaining_cpus -= set_bits;
+      continue;
     }
 
-    mask[i] = word;
+    __u64 word = mask[i];
+    __u64 kept = 0;
+
+    for (int bit_count = 0; bit_count < 64; bit_count++) {
+      __u64 bit;
+
+      if (remaining_cpus == 0)
+        break;
+
+      bit = word & -word;
+      kept |= bit;
+      word &= word - 1;
+      remaining_cpus--;
+    }
+
+    mask[i] = kept;
   }
 }
 
