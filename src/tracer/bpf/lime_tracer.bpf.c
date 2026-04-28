@@ -118,7 +118,7 @@ static inline u32 get_ppid(struct task_struct *t) {
   struct task_struct *p;
   u32 ppid;
 
-  bpf_core_read(&p, sizeof(p), &t->real_parent);
+  bpf_core_read(&p, sizeof(struct task_struct *), &t->real_parent);
   bpf_core_read(&ppid, sizeof(ppid), &p->pid);
 
   return ppid;
@@ -337,7 +337,7 @@ static inline void emit_process_info_event(struct task_struct *t) {
                             sizeof(event->evd.process_info_start.comm), t->comm);
   submit_event(event);
 
-  bpf_core_read(&mm, sizeof(mm), &t->mm);
+  bpf_core_read(&mm, sizeof(struct mm_struct *), &t->mm);
   if (!mm)
     goto end;
 
@@ -1158,7 +1158,6 @@ int on_sched_yield(struct sched_yield_args *ctx) {
   u64 pid_tgid;
   struct lime_event *event;
   struct task_struct *t;
-  struct sched_dl_entity *se;
   u64 hrt;
   int err;
   int policy;
@@ -1176,8 +1175,6 @@ int on_sched_yield(struct sched_yield_args *ctx) {
 
   ts = now();
   pid_tgid = bpf_get_current_pid_tgid();
-
-  bpf_core_read(&se, sizeof(se), &t->dl);
 
   hrt = (u64)&t->dl.dl_timer;
 
@@ -1488,20 +1485,20 @@ static inline struct file *get_struct_file(struct task_struct *t, int fd) {
   }
 
   // get files_struct
-  bpf_core_read(&f, sizeof(f), &t->files);
+  bpf_core_read(&f, sizeof(struct files_struct *), &t->files);
 
   // get fdt table
-  bpf_probe_read(&fdt, sizeof(fdt), (void *)&f->fdt);
+  bpf_probe_read(&fdt, sizeof(struct fdtable *), (void *)&f->fdt);
 
   // get files table
-  long ret = bpf_probe_read(&fdd, sizeof(fdd), (void *)&fdt->fd);
+  long ret = bpf_probe_read(&fdd, sizeof(struct file **), (void *)&fdt->fd);
 
   if (ret) {
     bpf_printk("bpf_probe_read failed: %d\n", ret);
     return NULL;
   }
 
-  bpf_probe_read(&file, sizeof(file), (void *)&fdd[fd]);
+  bpf_probe_read(&file, sizeof(struct file *), (void *)&fdd[fd]);
 
   return file;
 }
@@ -1545,7 +1542,7 @@ int on_sys_enter_read(struct read_args *ctx) {
     return 0;
 
   // Get file mode
-  bpf_core_read(&inode, sizeof(inode), &f->f_inode);
+  bpf_core_read(&inode, sizeof(struct inode *), &f->f_inode);
   bpf_core_read(&mode, sizeof(mode), &inode->i_mode);
 
   switch (mode & S_IFMT) {
@@ -2152,7 +2149,8 @@ struct semop_args {
 static inline int do_on_sys_enter_semop(struct semop_args *ctx, int timed) {
   struct task_struct *t = NULL;
   struct lime_event *event;
-  struct sembuf *tsops, *tsop;
+  struct sembuf *tsops;
+  struct sembuf tsop;
   int sem_op;
   int sem_flg;
   u64 ts;
@@ -2179,8 +2177,8 @@ static inline int do_on_sys_enter_semop(struct semop_args *ctx, int timed) {
 
   for (int i = 0; i < n; i++) {
     bpf_core_read_user(&tsop, sizeof(tsop), &tsops[i]);
-    bpf_core_read_user(&sem_op, sizeof(sem_op), &tsop->sem_op);
-    bpf_core_read_user(&sem_flg, sizeof(sem_flg), &tsop->sem_flg);
+    sem_op = tsop.sem_op;
+    sem_flg = tsop.sem_flg;
 
     if ((sem_op <= 0) && !(sem_flg & IPC_NOWAIT)) {
       blocking = true;
