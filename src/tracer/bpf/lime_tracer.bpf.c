@@ -2151,8 +2151,6 @@ static inline int do_on_sys_enter_semop(struct semop_args *ctx, int timed) {
   struct lime_event *event;
   struct sembuf *tsops;
   struct sembuf tsop;
-  int sem_op;
-  int sem_flg;
   u64 ts;
   u64 pid_tgid;
   bool blocking = false;
@@ -2177,10 +2175,8 @@ static inline int do_on_sys_enter_semop(struct semop_args *ctx, int timed) {
 
   for (int i = 0; i < n; i++) {
     bpf_core_read_user(&tsop, sizeof(tsop), &tsops[i]);
-    sem_op = tsop.sem_op;
-    sem_flg = tsop.sem_flg;
 
-    if ((sem_op <= 0) && !(sem_flg & IPC_NOWAIT)) {
+    if ((tsop.sem_op <= 0) && !(tsop.sem_flg & IPC_NOWAIT)) {
       blocking = true;
       break;
     }
