@@ -409,6 +409,7 @@ mod tests {
 
         let j = Job {
             release: 12,
+            release_lo: None,
             arrival: None,
             first_cycle: 12,
             end: 50,
@@ -424,6 +425,7 @@ mod tests {
 
         let j = Job {
             release: 62,
+            release_lo: None,
             arrival: None,
             first_cycle: 62,
             end: 100,
@@ -437,6 +439,7 @@ mod tests {
 
         let j = Job {
             release: 12,
+            release_lo: None,
             first_cycle: 12,
             arrival: None,
             end: 100,
@@ -449,6 +452,7 @@ mod tests {
 
         let j = Job {
             release: 0,
+            release_lo: None,
             first_cycle: 0,
             arrival: None,
             end: 100,
