@@ -110,6 +110,8 @@ message EventData {
         ProcessInfoUpdate process_info_update = 53;
         SchedPolicyUpdate sched_policy_update = 54;
         AffinityUpdate affinity_update = 55;
+        EnterItTask enter_it_task = 56;
+        ExitItTask exit_it_task = 57;
     }
 }
 
@@ -258,6 +260,14 @@ message EnterSetScheduler {
 message EnterSemop {
     int32 sem_id = 1;
     uint64 timeout = 2;
+}
+
+message EnterItTask {
+    string it_task_id = 1;
+}
+
+message ExitItTask {
+    string it_task_id = 1;
 }
 
 message RawSchedulerChange {}
