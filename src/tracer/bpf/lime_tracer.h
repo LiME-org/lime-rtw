@@ -66,6 +66,8 @@ typedef enum event_type {
     SCHED_PROCESS_EXIT,
     SCHED_PROCESS_FORK,
     SCHED_PROCESS_EXEC,
+    ENTER_IT_TASK,
+    EXIT_IT_TASK,
 
     ENTER_SCHED_SETAFFINITY,
     SCHED_AFFINITY_CHANGE,
@@ -268,6 +270,10 @@ struct enter_semop {
     u64 timeout;
 };
 
+struct it_task {
+    u64 it_task_id;
+};
+
 struct lime_event {
     event_type_t ev_type;
 	__u64 pid_tgid;
@@ -307,6 +313,7 @@ struct lime_event {
         struct lime_affinity_update_start affinity_update_start;
         struct lime_affinity_update_chunk affinity_update_chunk;
         struct dl_timer dl_timer;
+        struct it_task it_task;
 
 
         struct exit_ar exit_ar;

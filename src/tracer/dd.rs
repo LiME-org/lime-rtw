@@ -308,6 +308,13 @@ impl From<&RawEvent> for EventData {
                 unreachable!("process info fragments must be handled before conversion")
             }
 
+            EventType::ENTER_IT_TASK => EventData::EnterItTask {
+                it_task_id: format!("symbol_{}", unsafe { event.evd.it_task.it_task_id }),
+            },
+            EventType::EXIT_IT_TASK => EventData::ExitItTask {
+                it_task_id: format!("symbol_{}", unsafe { event.evd.it_task.it_task_id }),
+            },
+
             EventType::SCHED_SCHEDULER_CHANGE => EventData::RawSchedulerChange {},
             EventType::SCHED_SCHEDULER_CHANGE_FAILED => EventData::SchedulerChangeFailed {},
             EventType::AFFINITY_UPDATE_START

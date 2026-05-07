@@ -8,7 +8,7 @@ use crate::utils::any_as_u8_slice_mut;
 use crate::{EventProcessor, EventSource};
 use anyhow::{Error, Result};
 use libbpf_rs::skel::{OpenSkel, Skel, SkelBuilder};
-use libbpf_rs::{MapCore, MapFlags, MapHandle, RingBuffer, RingBufferBuilder};
+use libbpf_rs::{MapCore, MapFlags, MapHandle, RingBuffer, RingBufferBuilder, UprobeOpts};
 use nix::sys;
 use nix::sys::signal::Signal::{self, SIGCHLD};
 use plain::Plain;
@@ -244,6 +244,85 @@ fn bump_memlock_rlimit() -> Result<()> {
     Ok(())
 }
 
+#[derive(serde::Deserialize, Clone)]
+struct ItTask {
+    symbol: String,
+    #[allow(dead_code)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    demangled_symbol: Option<String>,
+    #[allow(dead_code)]
+    sample_count: usize,
+    #[allow(dead_code)]
+    #[serde(skip_serializing_if = "Option::is_none")]
+    offsets: Option<Vec<String>>,
+}
+
+#[derive(serde::Deserialize, Clone)]
+struct UserJob {
+    binary_path: String,
+    intra_thread_tasks: Vec<ItTask>,
+}
+
+fn attach_it_task_uprobes<'a>(
+    prog: &mut libbpf_rs::ProgramImpl<'a, libbpf_rs::Mut>,
+    prog_name: &str,
+    user_job: &UserJob,
+    links: &mut Vec<libbpf_rs::Link>,
+    failed: &mut Vec<String>,
+) -> usize {
+    let mut attached = 0;
+    let is_enter = prog_name == "enter_it_task";
+
+    for (symbol_idx, task) in user_job.intra_thread_tasks.iter().enumerate() {
+        let mut attached_symbol = false;
+
+        if let Some(offsets) = &task.offsets {
+            for offset_str in offsets {
+                if let Some(offset_hex) = offset_str.strip_prefix("0x") {
+                    if let Ok(offset) = usize::from_str_radix(offset_hex, 16) {
+                        let opts = UprobeOpts {
+                            func_name: None,
+                            cookie: symbol_idx as u64,
+                            retprobe: !is_enter,
+                            ..Default::default()
+                        };
+
+                        if let Ok(link) =
+                            prog.attach_uprobe_with_opts(-1, &user_job.binary_path, offset, opts)
+                        {
+                            links.push(link);
+                            attached += 1;
+                            attached_symbol = true;
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+
+        if attached_symbol {
+            continue;
+        }
+
+        let opts = UprobeOpts {
+            func_name: Some(task.symbol.clone()),
+            cookie: symbol_idx as u64,
+            retprobe: !is_enter,
+            ..Default::default()
+        };
+
+        match prog.attach_uprobe_with_opts(-1, &user_job.binary_path, 0, opts) {
+            Ok(link) => {
+                links.push(link);
+                attached += 1;
+            }
+            Err(_) => failed.push(task.symbol.clone()),
+        }
+    }
+
+    attached
+}
+
 struct BPFTracer<'a> {
     rx: Option<Receiver<Vec<TraceEvent>>>,
     handles: Vec<JoinHandle<Result<i32>>>,
@@ -255,6 +334,8 @@ struct BPFTracer<'a> {
     phantom: std::marker::PhantomData<&'a ()>,
     limiter_period: Duration,
     limiter_budget: usize,
+    it_task: Option<UserJob>,
+    it_task_symbols: FxHashMap<u64, String>,
     tx_batch_size: usize,
     poll_interval: Duration,
 }
@@ -272,6 +353,8 @@ impl BPFTracer<'_> {
             phantom: std::marker::PhantomData,
             limiter_period: Duration::from_secs(0),
             limiter_budget: 0,
+            it_task: None,
+            it_task_symbols: FxHashMap::default(),
             tx_batch_size: 4 * 1024,
             poll_interval: Duration::from_millis(10),
         }
@@ -284,6 +367,24 @@ impl BPFTracer<'_> {
         self.cmd = ctx.get_cmd();
         self.limiter_budget = ctx.limiter_budget;
         self.limiter_period = ctx.limiter_period;
+        self.it_task = ctx.it_task.as_ref().map(|path| {
+            let file = std::fs::File::open(path)
+                .unwrap_or_else(|e| panic!("Failed to open user job file {path}: {e}"));
+            serde_json::from_reader(file)
+                .unwrap_or_else(|e| panic!("Failed to parse user job JSON {path}: {e}"))
+        });
+        self.it_task_symbols = self
+            .it_task
+            .as_ref()
+            .map(|user_job| {
+                user_job
+                    .intra_thread_tasks
+                    .iter()
+                    .enumerate()
+                    .map(|(idx, task)| (idx as u64, task.symbol.clone()))
+                    .collect()
+            })
+            .unwrap_or_default();
         self.tx_batch_size = ctx.tx_batch_size;
         self.poll_interval = ctx.ebpf_poll_interval;
 
@@ -301,6 +402,7 @@ impl BPFTracer<'_> {
         let tracer_term = self.tracer_term.clone();
         let limiter_period = self.limiter_period;
         let limiter_budget = self.limiter_budget;
+        let it_task = self.it_task.clone();
         let tx_batch_size = self.tx_batch_size;
         let poll_interval = self.poll_interval;
         let verbose = self.verbose;
@@ -327,8 +429,22 @@ impl BPFTracer<'_> {
             let mut failed: Vec<String> = Vec::new();
             let mut attached: usize = 0;
             let prev = libbpf_rs::set_print(None);
-            for prog in skel.object_mut().progs_mut() {
+            for mut prog in skel.object_mut().progs_mut() {
                 let name = prog.name().to_string_lossy().into_owned();
+
+                if matches!(name.as_str(), "enter_it_task" | "exit_it_task") {
+                    if let Some(user_job) = &it_task {
+                        attached += attach_it_task_uprobes(
+                            &mut prog,
+                            &name,
+                            user_job,
+                            &mut links,
+                            &mut failed,
+                        );
+                    }
+                    continue;
+                }
+
                 match prog.attach() {
                     Ok(link) => {
                         links.push(link);
@@ -585,6 +701,10 @@ impl BPFTracer<'_> {
     pub fn events(&self) -> impl Iterator<Item = TraceEvent> + '_ {
         TraceEvents::new(self.rx.as_ref().unwrap().iter())
     }
+
+    pub fn get_symbol_name(&self, idx: u64) -> Option<&String> {
+        self.it_task_symbols.get(&idx)
+    }
 }
 
 struct TraceEvents<I> {
@@ -731,6 +851,31 @@ impl BPFSource<'_> {
     pub fn exit_status(&self) -> i32 {
         self.exit_status
     }
+
+    fn resolve_it_task_symbol(&self, event: &mut TraceEvent) {
+        let index = match &event.ev {
+            EventData::EnterItTask { it_task_id } | EventData::ExitItTask { it_task_id } => {
+                it_task_id
+                    .strip_prefix("symbol_")
+                    .and_then(|idx| idx.parse::<u64>().ok())
+            }
+            _ => None,
+        };
+        let Some(index) = index else {
+            return;
+        };
+
+        let Some(symbol) = self.tracer.get_symbol_name(index).cloned() else {
+            return;
+        };
+
+        match &mut event.ev {
+            EventData::EnterItTask { it_task_id } | EventData::ExitItTask { it_task_id } => {
+                *it_task_id = symbol;
+            }
+            _ => {}
+        }
+    }
 }
 
 enum RateLimiterResult {
@@ -827,7 +972,9 @@ impl EventSource for BPFSource<'_> {
         processor: &mut P,
         ctx: &LimeContext,
     ) -> Result<()> {
-        for event in self.tracer.events() {
+        for mut event in self.tracer.events() {
+            self.resolve_it_task_symbol(&mut event);
+
             let Some(task_id) = self.task_mapper.find_task_id(&event) else {
                 continue;
             };

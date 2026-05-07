@@ -350,6 +350,13 @@ pub enum EventData {
         timeout: u64,
     },
 
+    EnterItTask {
+        it_task_id: String,
+    },
+    ExitItTask {
+        it_task_id: String,
+    },
+
     /// Emitted when exiting a scheduler change system call. On success, the
     /// current task will end with `SchedulerChange` event, and new one will
     /// start with `SchedulerChanged` event. This event is a pseudo event. It
@@ -559,6 +566,12 @@ impl From<&EventData> for proto::EventData {
                 sem_id: *sem_id,
                 timeout: *timeout,
             }),
+            EventData::EnterItTask { it_task_id } => Event::EnterItTask(proto::EnterItTask {
+                it_task_id: it_task_id.clone(),
+            }),
+            EventData::ExitItTask { it_task_id } => Event::ExitItTask(proto::ExitItTask {
+                it_task_id: it_task_id.clone(),
+            }),
             EventData::RawSchedulerChange {} => {
                 Event::RawSchedulerChange(proto::RawSchedulerChange {})
             }
@@ -739,6 +752,12 @@ impl From<&proto::event_data::Event> for EventData {
             Event::EnterSemop(e) => EventData::EnterSemop {
                 sem_id: e.sem_id,
                 timeout: e.timeout,
+            },
+            Event::EnterItTask(e) => EventData::EnterItTask {
+                it_task_id: e.it_task_id.clone(),
+            },
+            Event::ExitItTask(e) => EventData::ExitItTask {
+                it_task_id: e.it_task_id.clone(),
             },
             Event::RawSchedulerChange(_) => EventData::RawSchedulerChange {},
             Event::SchedulerChange(e) => EventData::SchedulerChange {

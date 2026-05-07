@@ -75,6 +75,8 @@ pub struct LimeContext {
     pub allow_task_priority_change: bool,
     pub allow_task_affinity_change: bool,
 
+    pub it_task: Option<String>,
+
     pub tx_batch_size: usize,
 
     pub output_format: EventsFileFormat,
@@ -153,6 +155,7 @@ impl From<&CLI> for LimeContext {
             period_extractor_batch_size: cli_opts.period_extractor_batch_size(),
             allow_task_priority_change: cli_opts.allow_task_priority_change(),
             allow_task_affinity_change: cli_opts.allow_task_affinity_change(),
+            it_task: cli_opts.it_task(),
             tx_batch_size: cli_opts.tx_batch_size(),
             ebpf_poll_interval: cli_opts.ebpf_poll_interval(),
             output_format: cli_opts.output_format(),

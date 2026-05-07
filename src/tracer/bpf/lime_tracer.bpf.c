@@ -2228,4 +2228,48 @@ int on_sys_exit_semtimedop(void *ctx) { return handle_exit_arrival_site(ctx); }
 SEC("tracepoint/syscalls/sys_exit_semop")
 int on_sys_exit_semop(void *ctx) { return handle_exit_arrival_site(ctx); }
 
+SEC("uprobe")
+int enter_it_task(struct pt_regs *ctx) {
+  struct lime_event *event;
+  struct task_struct *t = bpf_get_current_task_btf();
+
+  if (filter_out_task(t))
+    return 0;
+
+  event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+  if (!event)
+    return -ENOMEM;
+
+  event->ev_type = ENTER_IT_TASK;
+  event->ts = now();
+  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->evd.it_task.it_task_id = bpf_get_attach_cookie(ctx);
+
+  submit_event(event);
+
+  return 0;
+}
+
+SEC("uretprobe")
+int exit_it_task(struct pt_regs *ctx) {
+  struct lime_event *event;
+  struct task_struct *t = bpf_get_current_task_btf();
+
+  if (filter_out_task(t))
+    return 0;
+
+  event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
+  if (!event)
+    return -ENOMEM;
+
+  event->ev_type = EXIT_IT_TASK;
+  event->ts = now();
+  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->evd.it_task.it_task_id = bpf_get_attach_cookie(ctx);
+
+  submit_event(event);
+
+  return 0;
+}
+
 const char LICENSE[] SEC("license") = "GPL";

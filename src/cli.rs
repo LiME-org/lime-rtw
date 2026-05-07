@@ -105,6 +105,10 @@ pub enum LimeSubCommand {
         /// it receives SIGINT.
         cmd: Vec<String>,
 
+        /// Path to JSON format intra-thread tasks
+        #[clap(long = "it-tasks", value_name = "IT_TASKS")]
+        it_task: Option<String>,
+
         /// Event batch size for processing
         #[clap(long, default_value = "4096")]
         tx_batch_size: usize,
@@ -211,6 +215,10 @@ pub enum LimeSubCommand {
         /// it receives SIGINT.
         #[cfg(target_os = "linux")]
         cmd: Vec<String>,
+
+        /// Path to JSON format intra-thread tasks
+        #[clap(long = "it-tasks", value_name = "IT_TASKS")]
+        it_task: Option<String>,
     },
 
     /// Observe the system and extract a workload model.
@@ -478,6 +486,15 @@ impl CLI {
                 ..
             } => allow_task_priority_change,
             _ => false,
+        }
+    }
+
+    pub fn it_task(&self) -> Option<String> {
+        match &self.command {
+            #[cfg(target_os = "linux")]
+            LimeSubCommand::Trace { it_task, .. } => it_task.clone(),
+            LimeSubCommand::Extract { it_task, .. } => it_task.clone(),
+            _ => None,
         }
     }
 
