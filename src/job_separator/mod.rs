@@ -23,11 +23,13 @@ use crate::{
 };
 
 use self::{
-    dfa::Dfa, sched_yield::SchedYieldDeadline, suspension::SelfSuspension, syscall::BlockingSyscall,
+    dfa::Dfa, it_task::ItTaskTracker, sched_yield::SchedYieldDeadline, suspension::SelfSuspension,
+    syscall::BlockingSyscall,
 };
 
 mod dfa;
 
+pub mod it_task;
 pub mod sched_yield;
 pub mod suspension;
 pub mod syscall;
@@ -75,6 +77,7 @@ pub struct SignatureMatcher {
     syscall: Dfa<BlockingSyscall>,
     suspension: Dfa<SelfSuspension>,
     sched_yield: Dfa<SchedYieldDeadline>,
+    it_task_tracker: ItTaskTracker,
     in_progress: usize,
     buffer: Vec<TraceEvent>,
 }
@@ -85,6 +88,7 @@ impl SignatureMatcher {
             syscall: Dfa::new(),
             suspension: Dfa::new(),
             sched_yield: Dfa::new(),
+            it_task_tracker: ItTaskTracker::new(),
             in_progress: 0,
             buffer: Vec::new(),
         }
@@ -113,6 +117,13 @@ impl SignatureMatcher {
         self.suspension.is_matching()
             || self.syscall.is_matching()
             || self.sched_yield.is_matching()
+            || self.it_task_tracker.is_tracking()
+    }
+
+    /// Extract it_task jobs directly from the event.
+    /// This should be called before consume_event.
+    pub fn extract_it_task_jobs(&mut self, event: &TraceEvent) -> Vec<(JobSeparator, Job)> {
+        self.it_task_tracker.process_event(event)
     }
 
     /// Consume an event and update the DFA state. Write succesfully extracted
@@ -164,6 +175,7 @@ impl JobSeparation {
     pub fn make_job(&self, next_boundary: &Self) -> Job {
         Job {
             arrival: self.curr_arrival,
+            release_lo: None,
             release: self.curr_release,
             end: next_boundary.prev_end,
             first_cycle: self.curr_first_cycle,
@@ -203,6 +215,7 @@ pub enum JobSeparator {
     SigTimedWait,
 
     Suspension,
+    ItTask { it_task_id: String },
 
     YieldSchedDeadline,
 }
@@ -229,6 +242,9 @@ impl Display for JobSeparator {
             }
             JobSeparator::SigTimedWait => "sigtimedwait".to_string(),
             JobSeparator::Suspension => "suspension".to_string(),
+            JobSeparator::ItTask { it_task_id } => {
+                format!("it_task {it_task_id}")
+            }
             JobSeparator::EpollPwait { epfd } => format!("epoll_pwait fd:{epfd}"),
             JobSeparator::PSelect6 { inp } => format!("pselect6 @:{inp:x}"),
             JobSeparator::YieldSchedDeadline => "yield_sched_deadline".to_string(),

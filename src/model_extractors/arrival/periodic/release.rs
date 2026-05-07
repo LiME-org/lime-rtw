@@ -73,6 +73,7 @@ mod tests {
     fn point_job(release: u64) -> Job {
         Job {
             arrival: None,
+            release_lo: None,
             release,
             end: release,
             first_cycle: release,

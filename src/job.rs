@@ -16,6 +16,8 @@ pub struct Job {
     /// Time at which is supposed
     /// to arrive in the system.
     pub arrival: Option<u64>,
+    /// Earliest potential job release time (only for uncertain release times)
+    pub release_lo: Option<u64>,
     /// First point in time the job is present in the system.
     pub release: u64,
     /// Last point in time

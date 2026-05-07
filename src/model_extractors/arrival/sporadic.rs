@@ -130,6 +130,7 @@ mod tests {
                 end: 0,
                 first_cycle: *t,
                 arrival: None,
+                release_lo: None,
                 release: *t,
             };
 

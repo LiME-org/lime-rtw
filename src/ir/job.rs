@@ -28,8 +28,14 @@ impl JobTracker {
         detected_jobs: &mut Vec<(JobSeparator, Job)>,
     ) -> usize {
         let mut ret = 0;
-        let mut separations = Vec::new();
 
+        // Extract it_task jobs directly
+        let it_task_jobs = self.signature_matcher.extract_it_task_jobs(&event);
+        ret += it_task_jobs.len();
+        detected_jobs.extend(it_task_jobs);
+
+        // Process other events with signature matcher
+        let mut separations = Vec::new();
         self.signature_matcher
             .consume_event(event, &mut separations);
 
