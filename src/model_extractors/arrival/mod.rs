@@ -22,10 +22,30 @@ pub enum ArrivalModel<'a> {
         dmaxs: Cow<'a, [u64]>,
     },
 
+    /// Arrival curves with release intervals represented with distance functions.
+    ArrivalCurveReleaseIntervals {
+        /// Lower bound minimum distance function.
+        dmins_lo: Cow<'a, [u64]>,
+        /// Lower bound maximum distance function.
+        dmaxs_lo: Cow<'a, [u64]>,
+        /// Upper bound minimum distance function.
+        dmins_hi: Cow<'a, [u64]>,
+        /// Upper bound maximum distance function.
+        dmaxs_hi: Cow<'a, [u64]>,
+    },
+
     /// Sporadic arrivals.
     Sporadic {
         /// Minimal interarrival time. Guaranteed to be strictly positive.
         mit: u64,
+    },
+
+    /// Sporadic arrivals with release intervals.
+    SporadicReleaseIntervals {
+        /// Lower bound of minimal interarrival time.
+        mit_lo: u64,
+        /// Upper bound of minimal interarrival time.
+        mit_hi: u64,
     },
 
     /// Periodic arrivals.
@@ -54,6 +74,21 @@ pub enum Periodic {
 
         /// Detected offset.
         offset: u64,
+    },
+    /// Periodic model with release intervals. Provides both possibly-fit and certainly-fit models.
+    ReleaseIntervals {
+        /// Certainly-fitting model period
+        period_certainly: u64,
+        /// Certainly-fitting model offset
+        offset_certainly: u64,
+        /// Certainly-fitting model max jitter
+        max_jitter_certainly: u64,
+        /// Possibly-fitting model period
+        period_possibly: u64,
+        /// Possibly-fitting model offset
+        offset_possibly: u64,
+        /// Possibly-fitting model max jitter
+        max_jitter_possibly: u64,
     },
 }
 

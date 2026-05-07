@@ -275,7 +275,7 @@ impl<T: Ord + Eq + Copy + Clone> Interval<T> {
     pub fn set_lower_bound(&mut self, lower: T) {
         let value = Value(lower);
 
-        assert!(value < self.b);
+        assert!(value <= self.b);
 
         self.a = value;
     }

@@ -1,13 +1,28 @@
 use lime_model_extractors::{
-    extractors::PeriodicExtractor as CratePeriodicExtractor, PeriodicConfig,
+    extractors::{
+        CertainFitPeriodicExtractor, PeriodicExtractor as ExactPeriodicExtractor,
+        PossibleFitPeriodicExtractor,
+    },
+    time::ReleaseWindow,
+    PeriodicConfig,
 };
 
 use crate::job::Job;
 
 use super::super::{ArrivalModel, ArrivalModelExtractor, Periodic};
 
+#[derive(Debug)]
+enum Backend {
+    Exact(ExactPeriodicExtractor),
+    Intervals {
+        certain: CertainFitPeriodicExtractor,
+        possible: PossibleFitPeriodicExtractor,
+    },
+}
+
 pub struct PeriodExtractor {
-    extractor: CratePeriodicExtractor,
+    config: PeriodicConfig,
+    backend: Option<Backend>,
 }
 
 impl PeriodExtractor {
@@ -22,14 +37,42 @@ impl PeriodExtractor {
             ..PeriodicConfig::default()
         };
 
-        let extractor = CratePeriodicExtractor::with_config(config)
-            .expect("periodic extractor config is valid");
-
-        Self { extractor }
+        Self {
+            config,
+            backend: None,
+        }
     }
 
+    pub fn analyse_batch_and_clear(&mut self) {}
+
     pub fn update(&mut self, job: &Job) {
-        self.extractor.feed([job.release]);
+        match (&mut self.backend, job.release_lo) {
+            (Some(Backend::Exact(exact)), None) => exact.feed([job.release]),
+            (Some(Backend::Intervals { certain, possible }), Some(release_lo)) => {
+                let window = ReleaseWindow::new(release_lo, job.release);
+                certain.feed([window]);
+                possible.feed([window]);
+            }
+            (None, None) => {
+                let mut exact = ExactPeriodicExtractor::with_config(self.config.clone())
+                    .expect("periodic extractor config is valid");
+                exact.feed([job.release]);
+                self.backend = Some(Backend::Exact(exact));
+            }
+            (None, Some(release_lo)) => {
+                let mut certain = CertainFitPeriodicExtractor::with_config(self.config.clone())
+                    .expect("certain-fit periodic extractor config is valid");
+                let mut possible = PossibleFitPeriodicExtractor::with_config(self.config.clone())
+                    .expect("possible-fit periodic extractor config is valid");
+                let window = ReleaseWindow::new(release_lo, job.release);
+                certain.feed([window]);
+                possible.feed([window]);
+                self.backend = Some(Backend::Intervals { certain, possible });
+            }
+            (Some(Backend::Exact(_)), Some(_)) | (Some(Backend::Intervals { .. }), None) => {
+                panic!("mixed point-release and release-window jobs for one periodic extractor")
+            }
+        }
     }
 }
 
@@ -41,17 +84,43 @@ impl Default for PeriodExtractor {
 
 impl ArrivalModelExtractor for PeriodExtractor {
     fn extract(&self) -> Option<ArrivalModel<'_>> {
-        let model = self.extractor.current_model()?;
+        match &self.backend {
+            Some(Backend::Intervals { certain, possible }) => {
+                let certainly = certain.current_model()?;
+                let possibly = possible.current_model()?;
 
-        if model.offset < 0 || model.jitter < 0 {
-            return None;
+                if certainly.offset < 0
+                    || certainly.jitter < 0
+                    || possibly.offset < 0
+                    || possibly.jitter < 0
+                {
+                    return None;
+                }
+
+                Some(ArrivalModel::Periodic(Periodic::ReleaseIntervals {
+                    period_certainly: certainly.period,
+                    offset_certainly: certainly.offset as u64,
+                    max_jitter_certainly: certainly.jitter as u64,
+                    period_possibly: possibly.period,
+                    offset_possibly: possibly.offset as u64,
+                    max_jitter_possibly: possibly.jitter as u64,
+                }))
+            }
+            Some(Backend::Exact(exact)) => {
+                let exact = exact.current_model()?;
+
+                if exact.offset < 0 || exact.jitter < 0 {
+                    return None;
+                }
+
+                Some(ArrivalModel::Periodic(Periodic::Release {
+                    period: exact.period,
+                    offset: exact.offset as u64,
+                    max_jitter: exact.jitter as u64,
+                }))
+            }
+            None => None,
         }
-
-        Some(ArrivalModel::Periodic(Periodic::Release {
-            period: model.period,
-            offset: model.offset as u64,
-            max_jitter: model.jitter as u64,
-        }))
     }
 }
 
