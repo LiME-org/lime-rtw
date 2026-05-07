@@ -86,3 +86,16 @@ directory can be set to the trace folder with the `--inplace` flag.
 ```shell
 sudo target/debug/lime-rtw extract --from <path_to_trace> --inplace
 ```
+
+### Intra-thread task modeling
+
+On the `lime-it` branch, LiME can model intra-thread tasks using a JSON task
+description passed with the `--it-tasks` flag. The flag is available for
+the `trace` and `extract` commands:
+
+```shell
+sudo target/debug/lime-rtw extract --it-tasks it-tasks.json -- <command>
+```
+
+The JSON input can be generated with the Intra-thread Task Finder (
+[`itt-finder`](https://github.com/LiME-org/itt-finder/)).
