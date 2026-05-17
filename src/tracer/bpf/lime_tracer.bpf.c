@@ -921,35 +921,6 @@ int on_sched_process_fork(u64 *ctx) {
   return 0;
 }
 
-struct rt_thread_info _info = {};
-
-/*
-
-SEC("iter/task")
-int dump_rt_threads(struct bpf_iter__task_file *ctx) {
-    pid_t pid;
-    u8 val = 1;
-    struct rt_thread_info info = {0};
-    struct seq_file *seq = ctx->meta->seq;
-    struct task_struct *task = ctx->task;
-
-    if (filter_out_task(task))
-        return 0;
-
-    bpf_core_read(&pid, sizeof(pid), &task->pid);
-    bpf_map_update_elem(&known_pids, &pid, &val, 0);
-
-    info.pid_tgid = get_pid_tgid(task);
-    info.cpu = get_task_cpu(task);
-    info.policy = get_sched_policy(task);
-    info.prio = get_sched_priority(task);
-
-    bpf_seq_write(seq, &info, sizeof(info));
-
-    return 0;
-}
-*/
-
 struct enter_clock_nanosleep_args {
   unsigned short common_type;
   unsigned char common_flags;
@@ -1437,7 +1408,6 @@ SEC("tracepoint/syscalls/sys_enter_clock_nanosleep")
 int on_sys_enter_clock_nanosleep(struct enter_clock_nanosleep_args *ctx) {
   u64 ts, secs = 1, nsecs = 1;
   u64 pid;
-  u32 policy;
 
   struct task_struct *t = NULL;
   struct lime_event *event;
@@ -1490,7 +1460,6 @@ SEC("tracepoint/syscalls/sys_enter_nanosleep")
 int on_sys_enter_nanosleep(struct enter_nanosleep_args *ctx) {
   u64 ts, secs = 1, nsecs = 1;
   u64 pid;
-  u32 policy;
 
   struct task_struct *t = NULL;
   struct lime_event *event;
@@ -2258,13 +2227,6 @@ int on_sys_exit_recvfrom(void *ctx) {
 
   return 0;
 }
-
-struct enter_recvmsg_args {
-  u64 unused[2];
-  u64 sock_fd;
-  u64 msghdr;
-  u64 flags;
-};
 
 SEC("tracepoint/syscalls/sys_enter_recvmsg")
 int on_sys_enter_recvmsg(struct enter_recv_args *ctx) {
