@@ -315,6 +315,18 @@ impl BPFTracer<'_> {
             let mut open_skel = skel_builder.open(&mut obj).map_err(Error::new)?;
 
             if let Some(rodata) = open_skel.maps.rodata_data.as_mut() {
+                let pidns_detection = match target_pid_ns {
+                    Some(inum) => pid_namespace::Detection::with_target_override(inum),
+                    None => pid_namespace::detect()?,
+                };
+                rodata.current_is_init_pidns = pidns_detection.current_is_init_pidns();
+                if let Some(current_pidns_inum) = pidns_detection.current_pidns_inum() {
+                    rodata.current_pidns_inum = current_pidns_inum;
+                }
+                if verbose {
+                    pidns_detection.log();
+                }
+
                 if !trace_all {
                     rodata.target_tgid = target_tgid.unwrap_or(cmd_pid);
                 }
@@ -849,3 +861,4 @@ impl EventSource for BPFSource<'_> {
 
 mod assembler;
 pub mod dd;
+mod pid_namespace;
