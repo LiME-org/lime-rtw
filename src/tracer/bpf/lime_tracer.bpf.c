@@ -984,7 +984,7 @@ static int handle_exit_arrival_site(struct exit_ar_args *ctx) {
     return -ENOMEM;
 
   ts = now();
-  pid_tgid = bpf_get_current_pid_tgid();
+  pid_tgid = get_pid_tgid(t);
 
   event->ev_type = EXIT_AS;
   event->pid_tgid = pid_tgid;
@@ -1397,7 +1397,7 @@ int on_sched_yield(struct sched_yield_args *ctx) {
     return 0;
 
   ts = now();
-  pid_tgid = bpf_get_current_pid_tgid();
+  pid_tgid = get_pid_tgid(t);
 
   hrt = (u64)&t->dl.dl_timer;
 
@@ -1455,7 +1455,7 @@ int on_sys_enter_clock_nanosleep(struct enter_clock_nanosleep_args *ctx) {
   if (!event)
     return -ENOMEM;
 
-  pid = bpf_get_current_pid_tgid();
+  pid = get_pid_tgid(t);
 
   event->ev_type = ENTER_CLOCK_NANOSLEEP;
   event->pid_tgid = pid;
@@ -1506,7 +1506,7 @@ int on_sys_enter_nanosleep(struct enter_nanosleep_args *ctx) {
   if (!event)
     return -ENOMEM;
 
-  pid = bpf_get_current_pid_tgid();
+  pid = get_pid_tgid(t);
 
   event->ev_type = ENTER_NANOSLEEP;
   event->pid_tgid = pid;
@@ -1553,7 +1553,7 @@ int on_sys_enter_select(struct select_args *ctx) {
 
   event->ev_type = ENTER_SELECT;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_select.inp = (u64)ctx->inp;
 
   if (tvp == NULL) {
@@ -1600,7 +1600,7 @@ int on_sys_enter_pselect6(struct pselect6_args *ctx) {
 
   event->ev_type = ENTER_PSELECT6;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_select.inp = (u64)ctx->inp;
 
   if (tsp == NULL) {
@@ -1650,7 +1650,7 @@ int on_sys_enter_poll(struct poll_args *ctx) {
 
   event->ev_type = ENTER_POLL;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_poll.pfds = (u64)ctx->pfds;
   event->evd.enter_poll.timeout_msecs = (int)ctx->timeout_msecs;
 
@@ -1683,7 +1683,7 @@ int on_sys_enter_ppoll(struct ppoll_args *ctx) {
 
   event->ev_type = ENTER_PPOLL;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_ppoll.pfds = (u64)ctx->pfds;
 
   bpf_core_read_user(&event->evd.enter_ppoll.tv_sec,
@@ -1743,14 +1743,11 @@ SEC("tracepoint/syscalls/sys_enter_read")
 int on_sys_enter_read(struct read_args *ctx) {
   struct task_struct *t = NULL;
   struct lime_event *event;
-  u64 pid_tgid;
   struct file *f;
   struct inode *inode;
   umode_t mode;
   unsigned int flags;
-  u8 val = 0;
   enum event_type ev_type = 0;
-  int fd;
 
   t = (struct task_struct *)bpf_get_current_task();
 
@@ -1796,12 +1793,9 @@ int on_sys_enter_read(struct read_args *ctx) {
   event->ts = now();
   event->ev_type = ev_type;
 
-  pid_tgid = bpf_get_current_pid_tgid();
-
-  event->pid_tgid = pid_tgid;
+  mark_current_filter_as();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_read.fd = ctx->fd;
-
-  bpf_map_update_elem(&filter_as, &pid_tgid, &val, BPF_NOEXIST);
 
   submit_event(event);
 
@@ -1816,13 +1810,8 @@ int on_sys_exit_ppoll(void *ctx) { return handle_exit_arrival_site(ctx); }
 
 SEC("tracepoint/syscalls/sys_exit_read")
 int on_sys_exit_read(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
@@ -1832,7 +1821,7 @@ struct accept_args {
   int fd;
 };
 
-int __on_enter_accept(struct accept_args *ctx) {
+int __on_enter_accept(int fd) {
   struct task_struct *t = NULL;
   struct lime_event *event;
 
@@ -1847,8 +1836,8 @@ int __on_enter_accept(struct accept_args *ctx) {
 
   event->ev_type = ENTER_ACCEPT;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
-  event->evd.enter_accept.sock_fd = ctx->fd;
+  event->pid_tgid = get_pid_tgid(t);
+  event->evd.enter_accept.sock_fd = fd;
 
   submit_event(event);
 
@@ -1856,10 +1845,10 @@ int __on_enter_accept(struct accept_args *ctx) {
 }
 
 SEC("tracepoint/syscalls/sys_enter_accept")
-int on_enter_accept(struct accept_args *ctx) { return __on_enter_accept(ctx); }
+int on_enter_accept(struct accept_args *ctx) { return __on_enter_accept(ctx->fd); }
 
 SEC("tracepoint/syscalls/sys_enter_accept4")
-int on_enter_accept4(struct accept_args *ctx) { return __on_enter_accept(ctx); }
+int on_enter_accept4(struct accept_args *ctx) { return __on_enter_accept(ctx->fd); }
 
 SEC("tracepoint/syscalls/sys_exit_accept")
 int on_sys_exit_accept(void *ctx) { return handle_exit_arrival_site(ctx); }
@@ -1894,8 +1883,6 @@ SEC("tracepoint/syscalls/sys_enter_futex")
 int on_sys_enter_futex(struct futex_args *ctx) {
   struct task_struct *t = NULL;
   struct lime_event *event;
-  u64 pid_tgid;
-  u8 val = 0;
 
   t = (struct task_struct *)bpf_get_current_task();
 
@@ -1918,10 +1905,9 @@ int on_sys_enter_futex(struct futex_args *ctx) {
     return -ENOMEM;
 
   event->ts = now();
-  pid_tgid = bpf_get_current_pid_tgid();
-  event->pid_tgid = pid_tgid;
+  mark_current_filter_as();
 
-  bpf_map_update_elem(&filter_as, &pid_tgid, &val, BPF_NOEXIST);
+  event->pid_tgid = get_pid_tgid(t);
 
   event->ev_type = ENTER_FUTEX;
   event->evd.enter_futex.op = ctx->op;
@@ -1934,13 +1920,8 @@ int on_sys_enter_futex(struct futex_args *ctx) {
 
 SEC("tracepoint/syscalls/sys_exit_futex")
 int on_sys_exit_futex(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
@@ -1961,7 +1942,7 @@ int on_sys_enter_rt_sigtimedwait(void *ctx) {
 
   event->ev_type = ENTER_RT_SIGTIMEDWAIT;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   submit_event(event);
 
@@ -1989,7 +1970,7 @@ int on_sys_enter_rt_sigsuspend(void *ctx) {
 
   event->ev_type = ENTER_RT_SIGSUSPEND;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   submit_event(event);
 
@@ -2022,7 +2003,7 @@ int on_sys_enter_epoll_wait(struct epoll_pwait_args *ctx) {
 
   event->ev_type = ENTER_EPOLL_PWAIT;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_epoll_pwait.epfd = ctx->epfd;
 
   submit_event(event);
@@ -2049,7 +2030,7 @@ int on_sys_enter_epoll_wait2(struct epoll_pwait_args *ctx) {
 
   event->ev_type = ENTER_EPOLL_PWAIT;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_epoll_pwait.epfd = ctx->epfd;
 
   submit_event(event);
@@ -2086,7 +2067,7 @@ int on_signal_deliver(u64 *ctx) {
 
   event->ev_type = DELIVER_RT_SIGNAL;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   siginfo = (struct kernel_siginfo *)ctx[1];
 
@@ -2114,7 +2095,7 @@ int on_sys_exit_rt_sigreturn(void *ctx) {
 
   event->ev_type = ENTER_RT_SIGRETURN;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   submit_event(event);
 
@@ -2137,7 +2118,7 @@ int on_sys_enter_pause(void *ctx) {
 
   event->ev_type = ENTER_PAUSE;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   submit_event(event);
 
@@ -2172,7 +2153,7 @@ int on_sys_enter_mq_timedreceive(struct enter_mq_timedreceive_args *ctx) {
 
   event->ev_type = ENTER_MQ_TIMEDRECEIVE;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   event->evd.enter_mq_timedreceive.mqd = ctx->mqdes;
 
@@ -2201,8 +2182,6 @@ static inline int on_enter_recv_common(struct enter_recv_args *ctx,
   struct task_struct *t = NULL;
   struct lime_event *event;
   struct file *f;
-  u8 val = 0;
-  u64 pid_tgid;
   u32 flags;
 
   if (no_wait) {
@@ -2226,11 +2205,9 @@ static inline int on_enter_recv_common(struct enter_recv_args *ctx,
 
   event->ev_type = ev_type;
   event->ts = now();
-  pid_tgid = bpf_get_current_pid_tgid();
+  mark_current_filter_as();
 
-  bpf_map_update_elem(&filter_as, &pid_tgid, &val, BPF_NOEXIST);
-
-  event->pid_tgid = pid_tgid;
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_recv.sock_fd = (int)ctx->sock_fd;
 
   submit_event(event);
@@ -2247,13 +2224,8 @@ int on_sys_enter_recv(struct enter_recv_args *ctx) {
 
 SEC("tracepoint/syscalls/sys_exit_recv")
 int on_sys_exit_recv(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
@@ -2267,13 +2239,8 @@ int on_sys_enter_recvfrom(struct enter_recv_args *ctx) {
 
 SEC("tracepoint/syscalls/sys_exit_recvfrom")
 int on_sys_exit_recvfrom(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
@@ -2294,13 +2261,8 @@ int on_sys_enter_recvmsg(struct enter_recv_args *ctx) {
 
 SEC("tracepoint/syscalls/sys_exit_recvmsg")
 int on_sys_exit_recvmsg(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
@@ -2314,13 +2276,8 @@ int on_sys_enter_recvmmsg(struct enter_recv_args *ctx) {
 
 SEC("tracepoint/syscalls/sys_exit_recvmmsg")
 int on_sys_exit_recvmmsg(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
@@ -2346,7 +2303,7 @@ int on_sys_enter_msgrcv(struct msgrcv_args *ctx) {
 
   event->ev_type = ENTER_MSGRCV;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   event->evd.enter_msgrcv.msqid = ctx->msqid;
 
@@ -2388,7 +2345,7 @@ static inline int do_on_sys_enter_semop(struct semop_args *ctx, int timed) {
     return 0;
 
   ts = now();
-  pid_tgid = bpf_get_current_pid_tgid();
+  pid_tgid = get_pid_tgid(t);
 
   if (ctx->nsops <= n) {
     n = ctx->nsops;
