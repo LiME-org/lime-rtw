@@ -38,7 +38,7 @@ extern void bpf_task_release(struct task_struct *task) __ksym;
 /* SCHED_ISO: reserved but not implemented yet */
 #define SCHED_IDLE 5
 #define SCHED_DEADLINE 6
-#define SCHED_POLICY_UNKNOWN ((__u32)-1)
+#define SCHED_POLICY_UNKNOWN ((u32)-1)
 
 #define ENOMEM 132
 
@@ -355,14 +355,14 @@ static inline void fill_sched_attr(struct task_struct *t,
 }
 
 static inline void fill_affinity_mask(struct task_struct *t,
-                                      __u64 mask[CPUMASK_U64_COUNT]) {
+                                      u64 mask[CPUMASK_U64_COUNT]) {
   int cpu_count = 0;
-  __u32 remaining_cpus;
+  u32 remaining_cpus;
 
   if (!t || !mask)
     return;
 
-  bpf_core_read(mask, sizeof(__u64) * CPUMASK_U64_COUNT, &t->cpus_mask.bits[0]);
+  bpf_core_read(mask, sizeof(u64) * CPUMASK_U64_COUNT, &t->cpus_mask.bits[0]);
 
   bpf_core_read(&cpu_count, sizeof(cpu_count), &t->nr_cpus_allowed);
 
@@ -383,17 +383,17 @@ static inline void fill_affinity_mask(struct task_struct *t,
       continue;
     }
 
-    __u32 set_bits = __builtin_popcountll(mask[i]);
+    u32 set_bits = __builtin_popcountll(mask[i]);
     if (set_bits <= remaining_cpus) {
       remaining_cpus -= set_bits;
       continue;
     }
 
-    __u64 word = mask[i];
-    __u64 kept = 0;
+    u64 word = mask[i];
+    u64 kept = 0;
 
     for (int bit_count = 0; bit_count < 64; bit_count++) {
-      __u64 bit;
+      u64 bit;
 
       if (remaining_cpus == 0)
         break;
@@ -554,14 +554,14 @@ static inline void emit_process_info_event(struct task_struct *t) {
 
 #pragma unroll
   for (int idx = 0; idx < LIME_CMD_CHUNK_COUNT; idx++) {
-    unsigned long offset = (__u64)idx * LIME_CMD_CHUNK_LEN;
+    unsigned long offset = (u64)idx * LIME_CMD_CHUNK_LEN;
 
     if (offset >= total_bytes)
       break;
 
-    __u32 chunk_len = LIME_CMD_CHUNK_LEN;
+    u32 chunk_len = LIME_CMD_CHUNK_LEN;
     if (offset + chunk_len > total_bytes)
-      chunk_len = (__u32)(total_bytes - offset);
+      chunk_len = (u32)(total_bytes - offset);
 
     event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
     if (!event)
@@ -617,10 +617,10 @@ static inline void emit_sched_policy_update_event(struct task_struct *t) {
 
 static inline void emit_affinity_update_event(struct task_struct *t) {
   struct lime_event *event;
-  __u64 mask[CPUMASK_U64_COUNT] = {};
-  __u64 pid_tgid;
+  u64 mask[CPUMASK_U64_COUNT] = {};
+  u64 pid_tgid;
   u64 ts;
-  const __u32 chunk_count = LIME_AFFINITY_CHUNK_COUNT;
+  const u32 chunk_count = LIME_AFFINITY_CHUNK_COUNT;
 
   if (!t)
     return;
@@ -641,9 +641,9 @@ static inline void emit_affinity_update_event(struct task_struct *t) {
 
 #pragma unroll
   for (int chunk = 0; chunk < LIME_AFFINITY_CHUNK_COUNT; chunk++) {
-    __u32 word_base = chunk * LIME_AFFINITY_CHUNK_WORDS;
-    __u32 remaining_words = 0;
-    __u32 copy_words = 0;
+    u32 word_base = chunk * LIME_AFFINITY_CHUNK_WORDS;
+    u32 remaining_words = 0;
+    u32 copy_words = 0;
 
     if (word_base >= CPUMASK_U64_COUNT)
       break;
@@ -663,10 +663,10 @@ static inline void emit_affinity_update_event(struct task_struct *t) {
     event->pid_tgid = pid_tgid;
     event->ts = ts;
     event->evd.affinity_update_chunk.chunk_len =
-        copy_words * sizeof(__u64);
+        copy_words * sizeof(u64);
 
     for (int i = 0; i < LIME_AFFINITY_CHUNK_WORDS; i++) {
-      __u32 word_idx = word_base + i;
+      u32 word_idx = word_base + i;
       if (i < copy_words && word_idx < CPUMASK_U64_COUNT) {
         event->evd.affinity_update_chunk.mask[i] = mask[word_idx];
       } else {
@@ -1059,7 +1059,7 @@ int handle_sys_enter_sched_setscheduler(struct sched_setscheduler_args *ctx) {
   case SCHED_RR:
     p = ctx->params;
     bpf_core_read_user(&prio, sizeof(prio), &p->sched_priority);
-    event->evd.sched_attr.attrs.rt.prio = (__u32)prio;
+    event->evd.sched_attr.attrs.rt.prio = (u32)prio;
     break;
 
   default:
@@ -1230,7 +1230,7 @@ int handle_sys_exit_sched_setattr(struct exit_ar_args *ctx) {
 }
 
 struct enter_setaffinity_args {
-  __u64 unused[2];
+  u64 unused[2];
   pid_t pid;           // First syscall arg
   size_t cpusetsize;   // Second syscall arg
   const unsigned long *user_mask_ptr;  // Third syscall arg

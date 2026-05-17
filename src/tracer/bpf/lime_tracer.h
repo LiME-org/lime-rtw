@@ -9,7 +9,7 @@
 
 #define CPUMASK_U64_COUNT 16  // Covers 1024 CPUs (16 * 64 bits)
 #define LIME_AFFINITY_CHUNK_LEN LIME_CMD_CHUNK_LEN
-#define LIME_AFFINITY_CHUNK_WORDS (LIME_AFFINITY_CHUNK_LEN / sizeof(__u64))
+#define LIME_AFFINITY_CHUNK_WORDS (LIME_AFFINITY_CHUNK_LEN / sizeof(u64))
 #define LIME_AFFINITY_CHUNK_COUNT                                             \
     ((CPUMASK_U64_COUNT + LIME_AFFINITY_CHUNK_WORDS - 1) /                     \
      LIME_AFFINITY_CHUNK_WORDS)
@@ -87,34 +87,34 @@ typedef enum event_type {
 } event_type_t;
 
 struct sched_switch {
-    __u64 prev;
-    __u32 prev_prio;
-    __u32 prev_policy;
-    __u64 next;
-    __u32 next_prio;
-    __u32 next_policy;
-    __u32 preempt;
-    __u32 prev_state;
+    u64 prev;
+    u32 prev_prio;
+    u32 prev_policy;
+    u64 next;
+    u32 next_prio;
+    u32 next_policy;
+    u32 preempt;
+    u32 prev_state;
 };
 
 struct sched_deschedule {
-    __u32 cpu;
-    __u32 prio;
-    __u32 state;
+    u32 cpu;
+    u32 prio;
+    u32 state;
 };
 
 struct sched_schedule {
-    __u32 prio;
-    __u32 cpu;
-    __u32 preempt;
+    u32 prio;
+    u32 cpu;
+    u32 preempt;
 };
 
 struct sched_wakeup {
-    __u32 cpu;
+    u32 cpu;
 };
 
 struct sched_migrate_task {
-    __u32 dest_cpu;
+    u32 dest_cpu;
 };
 
 struct clock_nanosleep {
@@ -206,39 +206,39 @@ struct enter_msgrcv {
 };
 
 struct lime_sched_attr {
-    __u32 old_policy;
-    __u32 policy;
+    u32 old_policy;
+    u32 policy;
 
     union {
         struct { 
-            __u32 prio;
+            u32 prio;
         } rt;
 
         struct {
-            __u64 runtime;
-            __u64 deadline;
-            __u64 period;
+            u64 runtime;
+            u64 deadline;
+            u64 period;
         } dl;
     } attrs;
 };
 
 struct lime_process_info_start {
-    __u32 ppid;
+    u32 ppid;
     char comm[TASK_COMM_LEN];
 };
 
 struct lime_process_info_chunk {
-    __u32 chunk_len;
+    u32 chunk_len;
     char chunk[LIME_CMD_CHUNK_LEN];
 };
 
 struct lime_affinity_update_start {
-    __u32 chunk_count;
+    u32 chunk_count;
 };
 
 struct lime_affinity_update_chunk {
-    __u32 chunk_len;
-    __u64 mask[LIME_AFFINITY_CHUNK_WORDS];
+    u32 chunk_len;
+    u64 mask[LIME_AFFINITY_CHUNK_WORDS];
 };
 
 enum si_code {
@@ -270,8 +270,8 @@ struct enter_semop {
 
 struct lime_event {
     event_type_t ev_type;
-	__u64 pid_tgid;
-    __u64 ts;
+    u64 pid_tgid;
+    u64 ts;
 
     union {
         // scheduling events
@@ -313,8 +313,8 @@ struct lime_event {
     } evd;
 };
 
-// Size calc: (ev_type (4) + pad-to-__u64) + pid_tgid (8) + ts (8)
-// + union max (40: lime_process_info_chunk rounded to __u64 alignment) =>
+// Size calc: (ev_type (4) + pad-to-u64) + pid_tgid (8) + ts (8)
+// + union max (40: lime_process_info_chunk rounded to u64 alignment) =>
 // 64 bytes
 enum {
     LIME_EVENT_SIZE_BYTES = 64,
@@ -323,10 +323,10 @@ _Static_assert(sizeof(struct lime_event) == LIME_EVENT_SIZE_BYTES,
                "lime_event size changed;");
 
 struct rt_thread_info {
-    __u64 pid_tgid;
-    __u32 policy;
-    __u32 prio;
-    __u32 cpu;
+    u64 pid_tgid;
+    u32 policy;
+    u32 prio;
+    u32 cpu;
 };
 
 #endif
