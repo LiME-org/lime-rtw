@@ -2060,7 +2060,7 @@ int on_signal_deliver(u64 *ctx) {
 }
 
 SEC("tracepoint/syscalls/sys_enter_rt_sigreturn")
-int on_sys_exit_rt_sigreturn(void *ctx) {
+int on_sys_enter_rt_sigreturn(void *ctx) {
   struct task_struct *t = NULL;
   struct lime_event *event;
 
