@@ -1387,7 +1387,7 @@ int on_sched_yield(struct sched_yield_args *ctx) {
 
   t = (struct task_struct *)bpf_get_current_task_btf();
 
-  policy = t->policy;
+  policy = get_sched_policy(t);
 
   if (policy != SCHED_DEADLINE) {
     return 0;
@@ -1424,7 +1424,7 @@ int on_sys_exit_sched_yield(void *ctx) {
   int policy;
 
   t = (struct task_struct *)bpf_get_current_task_btf();
-  policy = t->policy;
+  policy = get_sched_policy(t);
 
   if (policy != SCHED_DEADLINE) {
     return 0;
