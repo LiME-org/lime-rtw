@@ -1698,30 +1698,34 @@ int on_sys_enter_ppoll(struct ppoll_args *ctx) {
 }
 
 static inline struct file *get_struct_file(struct task_struct *t, int fd) {
-  struct files_struct *f;
-  struct fdtable *fdt;
-  struct file **fdd;
-  struct file *file;
+  struct files_struct *f = NULL;
+  struct fdtable *fdt = NULL;
+  struct file **fdd = NULL;
+  struct file *file = NULL;
+  unsigned int max_fds = 0;
+  long ret;
 
-  if (fd < 0) {
+  if (!t || fd < 0)
     return NULL;
-  }
 
-  // get files_struct
   bpf_core_read(&f, sizeof(struct files_struct *), &t->files);
-
-  // get fdt table
-  bpf_probe_read(&fdt, sizeof(struct fdtable *), (void *)&f->fdt);
-
-  // get files table
-  long ret = bpf_probe_read(&fdd, sizeof(struct file **), (void *)&fdt->fd);
-
-  if (ret) {
-    bpf_printk("bpf_probe_read failed: %d\n", ret);
+  if (!f)
     return NULL;
-  }
 
-  bpf_probe_read(&file, sizeof(struct file *), (void *)&fdd[fd]);
+  bpf_core_read(&fdt, sizeof(struct fdtable *), &f->fdt);
+  if (!fdt)
+    return NULL;
+
+  bpf_core_read(&max_fds, sizeof(max_fds), &fdt->max_fds);
+  if ((unsigned int)fd >= max_fds)
+    return NULL;
+
+  ret = bpf_core_read(&fdd, sizeof(struct file **), &fdt->fd);
+  if (ret || !fdd)
+    return NULL;
+
+  if (bpf_probe_read_kernel(&file, sizeof(struct file *), (void *)&fdd[fd]) < 0)
+    return NULL;
 
   return file;
 }
@@ -1755,6 +1759,8 @@ int on_sys_enter_read(struct read_args *ctx) {
     return 0;
 
   f = get_struct_file(t, ctx->fd);
+  if (!f)
+    return 0;
 
   // Check file is not in non-blocking mode
   bpf_core_read(&flags, sizeof(flags), &f->f_flags);
@@ -2194,6 +2200,9 @@ static inline int on_enter_recv_common(struct enter_recv_args *ctx,
     return 0;
 
   f = get_struct_file(t, ctx->sock_fd);
+  if (!f)
+    return 0;
+
   bpf_core_read(&flags, sizeof(flags), &f->f_flags);
 
   if (flags & O_NONBLOCK)
