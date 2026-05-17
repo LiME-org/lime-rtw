@@ -258,6 +258,7 @@ struct BPFTracer<'a> {
     limiter_budget: usize,
     tx_batch_size: usize,
     poll_interval: Duration,
+    target_pid_ns: Option<u32>,
 }
 
 impl BPFTracer<'_> {
@@ -276,6 +277,7 @@ impl BPFTracer<'_> {
             limiter_budget: 0,
             tx_batch_size: 4 * 1024,
             poll_interval: Duration::from_millis(10),
+            target_pid_ns: None,
         }
     }
 
@@ -289,6 +291,7 @@ impl BPFTracer<'_> {
         self.limiter_period = ctx.limiter_period;
         self.tx_batch_size = ctx.tx_batch_size;
         self.poll_interval = ctx.ebpf_poll_interval;
+        self.target_pid_ns = ctx.target_pid_ns;
 
         self
     }
@@ -308,6 +311,7 @@ impl BPFTracer<'_> {
         let tx_batch_size = self.tx_batch_size;
         let poll_interval = self.poll_interval;
         let verbose = self.verbose;
+        let target_pid_ns = self.target_pid_ns;
 
         std::thread::spawn(move || {
             let skel_builder = LimeTracerSkelBuilder::default();

@@ -24,6 +24,7 @@ enum CurrentPidNamespace {
     Initial,
     Nested { inum: u32 },
     Unknown { inum: u32 },
+    TargetOverride { inum: u32 },
 }
 
 pub struct Detection {
@@ -94,7 +95,9 @@ impl CurrentPidNamespace {
     fn inum(&self) -> Option<u32> {
         match *self {
             Self::Initial => None,
-            Self::Nested { inum } | Self::Unknown { inum } => Some(inum),
+            Self::Nested { inum } | Self::Unknown { inum } | Self::TargetOverride { inum } => {
+                Some(inum)
+            }
         }
     }
 }

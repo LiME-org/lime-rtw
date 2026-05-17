@@ -52,6 +52,9 @@ pub struct LimeContext {
     /// EBPF ring buffer poll interval
     pub ebpf_poll_interval: Duration,
 
+    /// PID namespace inode to translate traced PIDs into.
+    pub target_pid_ns: Option<u32>,
+
     /// If true, do not update RBFs until syscall job separator is detected.
     pub no_init_rbf_update: bool,
 
@@ -170,6 +173,7 @@ impl From<&CLI> for LimeContext {
             allow_task_affinity_change: cli_opts.allow_task_affinity_change(),
             tx_batch_size: cli_opts.tx_batch_size(),
             ebpf_poll_interval: cli_opts.ebpf_poll_interval(),
+            target_pid_ns: cli_opts.target_pid_ns(),
             output_format: cli_opts.output_format(),
             time_filter_after: cli_opts.time_filter_after(),
             time_filter_before: cli_opts.time_filter_before(),
