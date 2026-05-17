@@ -649,7 +649,9 @@ impl<I> TraceEvents<I> {
                 let ev = if let Some((old_policy, sched_policy)) =
                     self.pending_policy.remove(&event.id.pid)
                 {
-                    let policy_changed = sched_policy.policy_num() != old_policy;
+                    let old_policy_known = old_policy != SchedulingPolicy::Unknown.policy_num();
+                    let policy_changed =
+                        old_policy_known && sched_policy.policy_num() != old_policy;
                     let follow_up = if policy_changed {
                         EventData::SchedulerChanged { sched_policy }
                     } else {
