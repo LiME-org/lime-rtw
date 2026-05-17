@@ -1686,11 +1686,16 @@ int on_sys_enter_ppoll(struct ppoll_args *ctx) {
   event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_ppoll.pfds = (u64)ctx->pfds;
 
-  bpf_core_read_user(&event->evd.enter_ppoll.tv_sec,
-                     sizeof(event->evd.enter_ppoll.tv_sec), &tsp->tv_sec);
+  if (tsp == NULL) {
+    event->evd.enter_ppoll.tv_sec = -1;
+    event->evd.enter_ppoll.tv_nsec = 0;
+  } else {
+    bpf_core_read_user(&event->evd.enter_ppoll.tv_sec,
+                       sizeof(event->evd.enter_ppoll.tv_sec), &tsp->tv_sec);
 
-  bpf_core_read_user(&event->evd.enter_ppoll.tv_nsec,
-                     sizeof(event->evd.enter_ppoll.tv_nsec), &tsp->tv_nsec);
+    bpf_core_read_user(&event->evd.enter_ppoll.tv_nsec,
+                       sizeof(event->evd.enter_ppoll.tv_nsec), &tsp->tv_nsec);
+  }
 
   submit_event(event);
 
