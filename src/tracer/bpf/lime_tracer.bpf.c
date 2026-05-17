@@ -559,17 +559,19 @@ static inline void emit_process_info_event(struct task_struct *t) {
     if (offset >= total_bytes)
       break;
 
-    __u64 chunk_len = LIME_CMD_CHUNK_LEN;
+    __u32 chunk_len = LIME_CMD_CHUNK_LEN;
     if (offset + chunk_len > total_bytes)
-      chunk_len = (total_bytes - offset);
-
-    // Hard clamp for verifier and helper argument bounds.
-    if (chunk_len > sizeof(event->evd.process_info_chunk.chunk))
-      chunk_len = sizeof(event->evd.process_info_chunk.chunk);
+      chunk_len = (__u32)(total_bytes - offset);
 
     event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
     if (!event)
       break;
+
+    // Clamp after ringbuf_reserve to silence verifier false-positive;
+    // barrier_var anchors the verifier's bounds re-evaluation here.
+    barrier_var(chunk_len);
+    if (chunk_len > sizeof(event->evd.process_info_chunk.chunk))
+      chunk_len = sizeof(event->evd.process_info_chunk.chunk);
 
     event->ev_type = PROCESS_INFO_CMD_CHUNK;
     event->pid_tgid = pid_tgid;
