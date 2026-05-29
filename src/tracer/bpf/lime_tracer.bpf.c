@@ -528,7 +528,7 @@ static int filter_out_task(struct task_struct *t) {
     tgid = pid_tgid >> 32;
     ppid = get_ppid(t);
 
-    if ((target_tgid != tgid) && (target_tgid != ppid))
+    if ((target_tgid != tgid) && (target_tgid != pid) && (target_tgid != ppid))
       return 1;
   }
 

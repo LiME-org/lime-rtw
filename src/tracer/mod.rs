@@ -249,6 +249,7 @@ struct BPFTracer<'a> {
     handles: Vec<JoinHandle<Result<i32>>>,
     trace_best_effort: bool,
     trace_all: bool,
+    target_tgid: Option<i32>,
     verbose: bool,
     tracer_term: Arc<AtomicBool>,
     cmd: Option<std::process::Command>,
@@ -267,6 +268,7 @@ impl BPFTracer<'_> {
             trace_best_effort: false,
             verbose: false,
             trace_all: false,
+            target_tgid: None,
             tracer_term: Arc::new(AtomicBool::new(false)),
             handles: Vec::with_capacity(2),
             phantom: std::marker::PhantomData,
@@ -281,6 +283,7 @@ impl BPFTracer<'_> {
         self.verbose = ctx.verbose;
         self.trace_all = ctx.trace_all;
         self.trace_best_effort = ctx.trace_best_effort;
+        self.target_tgid = ctx.target_tgid;
         self.cmd = ctx.get_cmd();
         self.limiter_budget = ctx.limiter_budget;
         self.limiter_period = ctx.limiter_period;
@@ -298,6 +301,7 @@ impl BPFTracer<'_> {
     ) -> JoinHandle<Result<i32>> {
         let trace_all = self.trace_all;
         let trace_best_effort = self.trace_best_effort;
+        let target_tgid = self.target_tgid;
         let tracer_term = self.tracer_term.clone();
         let limiter_period = self.limiter_period;
         let limiter_budget = self.limiter_budget;
@@ -311,8 +315,8 @@ impl BPFTracer<'_> {
             let mut open_skel = skel_builder.open(&mut obj).map_err(Error::new)?;
 
             if let Some(rodata) = open_skel.maps.rodata_data.as_mut() {
-                if !trace_all && (cmd_pid != 0) {
-                    rodata.target_tgid = cmd_pid;
+                if !trace_all {
+                    rodata.target_tgid = target_tgid.unwrap_or(cmd_pid);
                 }
 
                 if trace_best_effort {
