@@ -82,6 +82,12 @@ impl Display for TaskId {
     }
 }
 
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TaskInfoTimeEvent {
+    pub boottime_ns: Option<u64>,
+    pub iso8601: Option<String>,
+}
+
 /// Task metadata.
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TaskInfos {
@@ -92,8 +98,8 @@ pub struct TaskInfos {
     pub cmd: Option<String>,
     pub policy: SchedulingPolicy,
     pub affinity_mask: Option<AffinityMask>,
-    pub first_event_time: Option<u64>,
-    pub last_event_time: Option<u64>,
+    pub first_event_time: Option<TaskInfoTimeEvent>,
+    pub last_event_time: Option<TaskInfoTimeEvent>,
 }
 
 impl TaskInfos {
@@ -120,8 +126,12 @@ impl TaskInfos {
                 cmd: self.cmd.as_deref(),
                 policy: &self.policy,
                 affinity_mask: self.affinity_mask.as_ref(),
-                first_event_time: json_event_time(self.first_event_time),
-                last_event_time: json_event_time(self.last_event_time),
+                first_event_time: json_event_time(
+                    self.first_event_time.as_ref().unwrap().boottime_ns,
+                ),
+                last_event_time: json_event_time(
+                    self.last_event_time.as_ref().unwrap().boottime_ns,
+                ),
             },
         )
     }
@@ -295,8 +305,14 @@ pub mod mapper {
                 cmd: None,
                 policy: Self::read_sched_policy(event.id.pid).unwrap_or(SchedulingPolicy::Unknown),
                 affinity_mask: Self::read_affinity_mask(event.id.pid).ok(),
-                first_event_time: Some(event.ts),
-                last_event_time: Some(event.ts),
+                first_event_time: Some(super::TaskInfoTimeEvent {
+                    boottime_ns: Some(event.ts),
+                    iso8601: None,
+                }),
+                last_event_time: Some(super::TaskInfoTimeEvent {
+                    boottime_ns: Some(event.ts),
+                    iso8601: None,
+                }),
             };
             Self::apply_event_metadata(&mut task_info, event);
 
@@ -334,7 +350,10 @@ pub mod mapper {
                 if task_info.id.tgid == 0 {
                     task_info.id.tgid = event.id.tgid;
                 }
-                task_info.last_event_time = Some(event.ts);
+                task_info.last_event_time = Some(super::TaskInfoTimeEvent {
+                    boottime_ns: Some(event.ts),
+                    iso8601: None,
+                });
                 Self::apply_event_metadata(task_info, event);
             }
         }
@@ -346,8 +365,14 @@ pub mod mapper {
                 self.infos.insert(
                     new_mapping,
                     TaskInfos {
-                        first_event_time: Some(event.ts),
-                        last_event_time: Some(event.ts),
+                        first_event_time: Some(super::TaskInfoTimeEvent {
+                            boottime_ns: Some(event.ts),
+                            iso8601: None,
+                        }),
+                        last_event_time: Some(super::TaskInfoTimeEvent {
+                            boottime_ns: Some(event.ts),
+                            iso8601: None,
+                        }),
                         ..task_info
                     },
                 );
