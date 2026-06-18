@@ -4,6 +4,12 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.1] - 2026-06-18
+
+### Fixed
+
+- Fixed task info deserialization for `*.infos.json` files written with ISO8601 event-time metadata.
+
 ## [0.4.0] - 2026-06-16
 
 ### Added
