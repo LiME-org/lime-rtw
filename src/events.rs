@@ -5,6 +5,7 @@
 use serde::{Deserialize, Serialize};
 use serde_hex::{CompactPfx, SerHex};
 
+#[cfg(feature = "proto")]
 use crate::proto;
 use crate::utils::ThreadId;
 
@@ -413,7 +414,7 @@ pub enum EventData {
     LimeEndOfTrace,
 }
 
-// Implement conversion from TraceEvent to protobuf message
+#[cfg(feature = "proto")]
 impl From<&TraceEvent> for proto::TraceEvent {
     fn from(event: &TraceEvent) -> Self {
         proto::TraceEvent {
@@ -427,6 +428,7 @@ impl From<&TraceEvent> for proto::TraceEvent {
     }
 }
 
+#[cfg(feature = "proto")]
 impl From<&EventData> for proto::EventData {
     fn from(event: &EventData) -> Self {
         use proto::event_data::Event;
@@ -634,6 +636,7 @@ impl From<&EventData> for proto::EventData {
     }
 }
 
+#[cfg(feature = "proto")]
 impl From<&proto::EventData> for EventData {
     fn from(proto_event: &proto::EventData) -> Self {
         match &proto_event.event {
@@ -643,7 +646,7 @@ impl From<&proto::EventData> for EventData {
     }
 }
 
-// Implement conversion for SchedulingPolicy
+#[cfg(feature = "proto")]
 impl From<&SchedulingPolicy> for proto::SchedulingPolicy {
     fn from(policy: &SchedulingPolicy) -> Self {
         use proto::scheduling_policy::Policy;
@@ -672,6 +675,7 @@ impl From<&SchedulingPolicy> for proto::SchedulingPolicy {
     }
 }
 
+#[cfg(feature = "proto")]
 impl From<&proto::event_data::Event> for EventData {
     fn from(event: &proto::event_data::Event) -> Self {
         use proto::event_data::Event;
@@ -801,26 +805,7 @@ impl From<&proto::event_data::Event> for EventData {
     }
 }
 
-impl From<i32> for ClockId {
-    fn from(value: i32) -> Self {
-        match value {
-            0 => ClockId::ClockRealtime,
-            1 => ClockId::ClockMonotonic,
-            2 => ClockId::ClockProcessCputimeId,
-            3 => ClockId::ClockThreadCputimeId,
-            4 => ClockId::ClockMonotonicRaw,
-            5 => ClockId::ClockRealtimeCoarse,
-            6 => ClockId::ClockMonotonicCoarse,
-            7 => ClockId::ClockBoottime,
-            8 => ClockId::ClockRealtimeAlarm,
-            9 => ClockId::ClockBoottimeAlarm,
-            10 => ClockId::ClockSgiCycle,
-            11 => ClockId::ClockTai,
-            _ => ClockId::ClockRealtime,
-        }
-    }
-}
-
+#[cfg(feature = "proto")]
 impl From<Option<proto::SchedulingPolicy>> for SchedulingPolicy {
     fn from(policy: Option<proto::SchedulingPolicy>) -> Self {
         match policy {
@@ -830,6 +815,7 @@ impl From<Option<proto::SchedulingPolicy>> for SchedulingPolicy {
     }
 }
 
+#[cfg(feature = "proto")]
 impl From<&proto::SchedulingPolicy> for SchedulingPolicy {
     fn from(policy: &proto::SchedulingPolicy) -> Self {
         match &policy.policy {
@@ -851,6 +837,7 @@ impl From<&proto::SchedulingPolicy> for SchedulingPolicy {
     }
 }
 
+#[cfg(feature = "proto")]
 impl From<&ProcessInfo> for proto::ProcessInfo {
     fn from(info: &ProcessInfo) -> Self {
         proto::ProcessInfo {
@@ -861,6 +848,7 @@ impl From<&ProcessInfo> for proto::ProcessInfo {
     }
 }
 
+#[cfg(feature = "proto")]
 impl From<&proto::ProcessInfo> for ProcessInfo {
     fn from(info: &proto::ProcessInfo) -> Self {
         ProcessInfo {
@@ -875,6 +863,27 @@ impl From<&proto::ProcessInfo> for ProcessInfo {
             } else {
                 Some(info.cmd.clone())
             },
+        }
+    }
+}
+
+#[cfg(feature = "proto")]
+impl From<i32> for ClockId {
+    fn from(value: i32) -> Self {
+        match value {
+            0 => ClockId::ClockRealtime,
+            1 => ClockId::ClockMonotonic,
+            2 => ClockId::ClockProcessCputimeId,
+            3 => ClockId::ClockThreadCputimeId,
+            4 => ClockId::ClockMonotonicRaw,
+            5 => ClockId::ClockRealtimeCoarse,
+            6 => ClockId::ClockMonotonicCoarse,
+            7 => ClockId::ClockBoottime,
+            8 => ClockId::ClockRealtimeAlarm,
+            9 => ClockId::ClockBoottimeAlarm,
+            10 => ClockId::ClockSgiCycle,
+            11 => ClockId::ClockTai,
+            _ => ClockId::ClockRealtime,
         }
     }
 }

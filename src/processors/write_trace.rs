@@ -35,6 +35,7 @@ impl TraceWriter {
                 task_id,
                 match self.format {
                     EventsFileFormat::Json => "json",
+                    #[cfg(feature = "proto")]
                     EventsFileFormat::Protobuf => "proto",
                 }
             );

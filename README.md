@@ -15,7 +15,9 @@ On Ubuntu, you can install these dependencies with these commands:
 
 ```shell
 apt-get update
-apt-get install -y libbpf-dev libelf-dev zlib1g-dev pkg-config clang protobuf-compiler
+apt-get install -y libbpf-dev libelf-dev zlib1g-dev pkg-config clang
+# protobuf-compiler is only required when building with the "proto" feature
+apt-get install -y protobuf-compiler
 ```
 
 ### Kernel Requirements
@@ -33,6 +35,37 @@ LIME_TARGET_KERNEL_VERSION=5.15.0 cargo build --release
 ```
 
 The variable accepts values of the form `major.minor[.patch]` (for example `5.15` or `6.6.32`). If the variable is unset or empty and the host kernel cannot be detected, the build will fail with an error that asks you to provide the variable explicitly.
+
+## Compile-time features
+
+The tool provides two optional features that can be toggled at compile time:
+
+| Feature | Default | Description |
+|---------|---------|-------------|
+| `tui`   | on      | Interactive terminal viewer for results |
+| `proto` | off     | Protobuf serialization for trace files |
+
+To build without the TUI viewer (enabled by default):
+
+```shell
+cargo build --no-default-features
+```
+
+To include protobuf support:
+
+```shell
+cargo build --features proto
+```
+
+To combine both options:
+
+```shell
+cargo build --no-default-features --features proto
+```
+
+When protobuf support is enabled, trace files can be written in protobuf format
+by passing `--format protobuf` to the `trace` subcommand. Without the `proto`
+feature, only JSON output is available.
 
 ## Building and running the tool
 

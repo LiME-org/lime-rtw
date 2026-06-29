@@ -13,7 +13,9 @@ image: "rust:latest"
 
 stages:
   - build
+  - test
   - bench
+  - view
 
 # Optional: Pick zero or more services to be used on all builds.
 # Only needed when using a docker container to run your tests in.
@@ -132,3 +134,49 @@ bench:extract:
       print(f"| Max | {max(times):.6f} |")
       PY
       cat "$summary_md"
+  artifacts:
+    paths:
+      - target/benchmarks/extract/workdir/input/*-*.infos.json
+      - target/benchmarks/extract/workdir/input/*-*.models.json
+    expire_in: 1 hour
+
+test:view-extract:
+  stage: view
+  needs:
+    - job: bench:extract
+      artifacts: true
+  script:
+    - rustc --version && cargo --version
+    - rustup component add rustfmt
+    - apt-get install -yqq --no-install-recommends util-linux
+    - cargo build
+    - |
+      set -euo pipefail
+      repo_root="$CI_PROJECT_DIR"
+      results_dir="$repo_root/target/view-extract"
+      input_dir="$repo_root/target/benchmarks/extract/workdir/input"
+      binary="$repo_root/target/debug/lime-rtw"
+      view_log="$results_dir/view.log"
+
+      mkdir -p "$results_dir"
+      test -d "$input_dir" || (echo "Extract artifact not found: $input_dir" >&2; exit 1)
+
+      mapfile -t info_files < <(find "$input_dir" -name "*.infos.json" -type f | sort)
+      if [ "${#info_files[@]}" -eq 0 ]; then
+        echo "No *.infos.json files found after extract." >&2
+        find "$input_dir" -maxdepth 2 -type f | sort >&2
+        exit 1
+      fi
+
+      set +e
+      timeout 5s script -q -e -c "$(printf "%q view %q" "$binary" "$input_dir")" /dev/null > "$view_log" 2>&1
+      view_status=$?
+      set -e
+      if [ "$view_status" -ne 0 ] && [ "$view_status" -ne 124 ]; then
+        cat "$view_log" >&2
+        exit "$view_status"
+      fi
+      if grep -q "Error:" "$view_log"; then
+        cat "$view_log" >&2
+        exit 1
+      fi

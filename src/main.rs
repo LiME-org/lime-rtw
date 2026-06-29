@@ -2,9 +2,12 @@ use anyhow::{Error, Result};
 use clap::Parser;
 use lime_rtw::{
     context::LimeContext, processors::extract_job::JobExtractor,
-    processors::extract_model::TaskModelExtractor, trace::reader::TraceReader, view::ViewProcessor,
-    EventProcessor, EventSource,
+    processors::extract_model::TaskModelExtractor, trace::reader::TraceReader, EventProcessor,
+    EventSource,
 };
+
+#[cfg(feature = "tui")]
+use lime_rtw::view::ViewProcessor;
 
 #[cfg(target_os = "linux")]
 use lime_rtw::processors::write_trace::TraceWriter;
@@ -26,10 +29,11 @@ pub fn run<C: EventProcessor>(mut command: C, opts: &CLI, ctx: LimeContext) -> R
             std::process::exit(src.exit_status())
         }
         EventSourceType::TraceFolder(path) => {
-            TraceReader::new(path)
+            TraceReader::new(&path)
                 .start()
                 .process_events(command, &ctx)?;
         }
+        #[cfg(feature = "tui")]
         EventSourceType::ViewFolder(path) => {
             ViewProcessor::new(&path).run(&ctx)?;
         }
@@ -59,6 +63,7 @@ fn main() -> Result<(), Error> {
 
             run(processor, &opts, ctx)
         }
+        #[cfg(feature = "tui")]
         LimeSubCommand::View { folder } => {
             let processor = ViewProcessor::new(folder);
             run(processor, &opts, ctx)

@@ -92,7 +92,9 @@ pub struct TaskInfos {
     pub cmd: Option<String>,
     pub policy: SchedulingPolicy,
     pub affinity_mask: Option<AffinityMask>,
+    #[serde(deserialize_with = "deserialize_event_time")]
     pub first_event_time: Option<u64>,
+    #[serde(deserialize_with = "deserialize_event_time")]
     pub last_event_time: Option<u64>,
 }
 
@@ -131,6 +133,26 @@ impl TaskInfos {
 struct JsonEventTimeView {
     boottime_ns: u64,
     iso8601: String,
+}
+
+#[derive(Deserialize)]
+#[serde(untagged)]
+enum JsonEventTime {
+    BoottimeNs(u64),
+    WithIso8601 { boottime_ns: u64 },
+}
+
+fn deserialize_event_time<'de, D>(deserializer: D) -> Result<Option<u64>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    Option::<JsonEventTime>::deserialize(deserializer).map(|maybe_json_event_time| {
+        maybe_json_event_time.map(|json_event_time| match json_event_time {
+            JsonEventTime::BoottimeNs(boottime_ns) | JsonEventTime::WithIso8601 { boottime_ns } => {
+                boottime_ns
+            }
+        })
+    })
 }
 
 #[derive(Serialize)]
@@ -439,5 +461,44 @@ pub mod mapper {
         fn default() -> Self {
             Self::new()
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn task_infos_deserializes_from_pretty_serialized_output() {
+        let task_info = TaskInfos {
+            id: ThreadId::new(123, 456),
+            ppid: Some(1),
+            comm: Some("cyclictest".to_string()),
+            cmd: Some("cyclictest --priority 90".to_string()),
+            policy: SchedulingPolicy::Fifo { prio: 90 },
+            affinity_mask: Some(AffinityMask {
+                cpu_set: vec![0, 2],
+            }),
+            first_event_time: Some(1_000),
+            last_event_time: Some(2_000),
+        };
+
+        let mut serialized = Vec::new();
+        task_info.write_pretty(&mut serialized, None).unwrap();
+
+        let deserialized: TaskInfos = serde_json::from_slice(&serialized).unwrap();
+
+        assert_eq!(deserialized.id, task_info.id);
+        assert_eq!(deserialized.id.tgid, task_info.id.tgid);
+        assert_eq!(deserialized.ppid, task_info.ppid);
+        assert_eq!(deserialized.comm, task_info.comm);
+        assert_eq!(deserialized.cmd, task_info.cmd);
+        assert_eq!(deserialized.policy, task_info.policy);
+        assert_eq!(
+            deserialized.affinity_mask.unwrap().cpu_set,
+            task_info.affinity_mask.unwrap().cpu_set
+        );
+        assert_eq!(deserialized.first_event_time, task_info.first_event_time);
+        assert_eq!(deserialized.last_event_time, task_info.last_event_time);
     }
 }

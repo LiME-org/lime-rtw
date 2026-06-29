@@ -15,6 +15,8 @@
 
 use std::time::Duration;
 
+#[cfg(target_os = "linux")]
+use crate::cli::TraceTarget;
 use crate::cli::{EventSourceType, CLI};
 use crate::io::LimeOutputDirectory;
 use crate::task::TimeReference;
@@ -36,6 +38,8 @@ pub struct LimeContext {
     pub trace_all: bool,
     /// If true, add CFS to the set of tracked scheduling policies.
     pub trace_best_effort: bool,
+    /// Existing process TGID or thread TID to trace.
+    pub target_tgid: Option<i32>,
     /// Rate limiter period.
     pub limiter_period: Duration,
     /// Rate limiter budget.
@@ -47,6 +51,9 @@ pub struct LimeContext {
 
     /// EBPF ring buffer poll interval
     pub ebpf_poll_interval: Duration,
+
+    /// PID namespace inode to translate traced PIDs into.
+    pub target_pid_ns: Option<u32>,
 
     /// If true, do not update RBFs until syscall job separator is detected.
     pub no_init_rbf_update: bool,
@@ -120,6 +127,16 @@ impl From<&CLI> for LimeContext {
         let command_args = std::env::args().collect();
 
         #[cfg(target_os = "linux")]
+        let (cmd_vec, target_tgid) = match cli_opts.trace_target() {
+            Some(TraceTarget::Command(cmd)) => (cmd.to_vec(), None),
+            Some(TraceTarget::TargetTgid(target_tgid)) => (Vec::new(), Some(target_tgid)),
+            None => (Vec::new(), None),
+        };
+
+        #[cfg(not(target_os = "linux"))]
+        let (cmd_vec, target_tgid) = (Vec::new(), None);
+
+        #[cfg(target_os = "linux")]
         let is_bpf_tracer = matches!(cli_opts.event_source_type(), EventSourceType::BPFTracer);
         #[cfg(not(target_os = "linux"))]
         let is_bpf_tracer = false;
@@ -145,8 +162,9 @@ impl From<&CLI> for LimeContext {
             rbf_min_sep: cli_opts.rbf_min_sep().unwrap_or_default(),
             trace_all: cli_opts.trace_all(),
             trace_best_effort: cli_opts.trace_best_effort(),
+            target_tgid,
             all_threads: cli_opts.all_threads(),
-            cmd_vec: cli_opts.get_cmd_vec().cloned().unwrap_or_default(),
+            cmd_vec,
             limiter_period: cli_opts.rate_limiter_period().unwrap_or_default(),
             limiter_budget: cli_opts.rate_limiter_budget().unwrap_or_default(),
             output_dir: LimeOutputDirectory::from(cli_opts),
@@ -158,6 +176,7 @@ impl From<&CLI> for LimeContext {
             it_task: cli_opts.it_task(),
             tx_batch_size: cli_opts.tx_batch_size(),
             ebpf_poll_interval: cli_opts.ebpf_poll_interval(),
+            target_pid_ns: cli_opts.target_pid_ns(),
             output_format: cli_opts.output_format(),
             time_filter_after: cli_opts.time_filter_after(),
             time_filter_before: cli_opts.time_filter_before(),

@@ -4,6 +4,35 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.4.1] - 2026-06-18
+
+### Fixed
+
+- Fixed task info deserialization for `*.infos.json` files written with ISO8601 event-time metadata.
+
+## [0.4.0] - 2026-06-16
+
+### Added
+
+- PID namespace-aware tracing: LiME now detects the current PID namespace at startup (via `/proc/self/ns/pid` and the `NS_GET_ID` ioctl) and automatically translates kernel-level PIDs into the target namespace when running inside a container. A new `--target-pid-ns INODE` flag overrides this detection, which is needed when LiME runs on the host but the traced process is inside a container.
+- Allow tracing an existing process or thread by passing a numeric PID/TID as the trace target, instead of a command to execute. When a single numeric argument is given, LiME attaches to the existing process rather than spawning a new one.
+- Compile-time feature flags: `tui` and `proto` features let users opt out of the TUI viewer or protobuf support to reduce build dependencies. Both are documented in the README with example build commands.
+
+### Changed
+
+- The TUI viewer (`tui` feature) is now a **default feature** — included by default, disabled with `--no-default-features`.
+- Protobuf output support is now gated behind the **`proto` Cargo feature**, making `protobuf-compiler` an optional dependency.
+- Replaced `__u32`/`__u64` with `u32`/`u64` in BPF probe code, using standard BPF CO-RE type aliases.
+- Added a NULL-pointer guard on the `tsp` (timespec) argument in the `ppoll` eBPF handler.
+- Hardened BPF file descriptor lookups with more robust error handling.
+- Clamped BPF process-info chunk reads to silence eBPF verifier false-positive out-of-bounds errors.
+- Removed dead code from the BPF probes.
+
+### Fixed
+
+- Fixed `on_sched_yield` and `on_sys_exit_sched_yield` probes to use `get_sched_policy()` instead of reading `t->policy` directly, which was bypassing CO-RE relocation.
+- Renamed a misleading function name in the BPF probes.
+
 ## [0.3.0] - 2026-05-06
 
 ### Added

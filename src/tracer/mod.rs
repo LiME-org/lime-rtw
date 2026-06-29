@@ -328,6 +328,7 @@ struct BPFTracer<'a> {
     handles: Vec<JoinHandle<Result<i32>>>,
     trace_best_effort: bool,
     trace_all: bool,
+    target_tgid: Option<i32>,
     verbose: bool,
     tracer_term: Arc<AtomicBool>,
     cmd: Option<std::process::Command>,
@@ -338,6 +339,7 @@ struct BPFTracer<'a> {
     it_task_symbols: FxHashMap<u64, String>,
     tx_batch_size: usize,
     poll_interval: Duration,
+    target_pid_ns: Option<u32>,
 }
 
 impl BPFTracer<'_> {
@@ -348,6 +350,7 @@ impl BPFTracer<'_> {
             trace_best_effort: false,
             verbose: false,
             trace_all: false,
+            target_tgid: None,
             tracer_term: Arc::new(AtomicBool::new(false)),
             handles: Vec::with_capacity(2),
             phantom: std::marker::PhantomData,
@@ -357,6 +360,7 @@ impl BPFTracer<'_> {
             it_task_symbols: FxHashMap::default(),
             tx_batch_size: 4 * 1024,
             poll_interval: Duration::from_millis(10),
+            target_pid_ns: None,
         }
     }
 
@@ -364,6 +368,7 @@ impl BPFTracer<'_> {
         self.verbose = ctx.verbose;
         self.trace_all = ctx.trace_all;
         self.trace_best_effort = ctx.trace_best_effort;
+        self.target_tgid = ctx.target_tgid;
         self.cmd = ctx.get_cmd();
         self.limiter_budget = ctx.limiter_budget;
         self.limiter_period = ctx.limiter_period;
@@ -387,6 +392,7 @@ impl BPFTracer<'_> {
             .unwrap_or_default();
         self.tx_batch_size = ctx.tx_batch_size;
         self.poll_interval = ctx.ebpf_poll_interval;
+        self.target_pid_ns = ctx.target_pid_ns;
 
         self
     }
@@ -399,6 +405,7 @@ impl BPFTracer<'_> {
     ) -> JoinHandle<Result<i32>> {
         let trace_all = self.trace_all;
         let trace_best_effort = self.trace_best_effort;
+        let target_tgid = self.target_tgid;
         let tracer_term = self.tracer_term.clone();
         let limiter_period = self.limiter_period;
         let limiter_budget = self.limiter_budget;
@@ -406,6 +413,7 @@ impl BPFTracer<'_> {
         let tx_batch_size = self.tx_batch_size;
         let poll_interval = self.poll_interval;
         let verbose = self.verbose;
+        let target_pid_ns = self.target_pid_ns;
 
         std::thread::spawn(move || {
             let skel_builder = LimeTracerSkelBuilder::default();
@@ -413,8 +421,20 @@ impl BPFTracer<'_> {
             let mut open_skel = skel_builder.open(&mut obj).map_err(Error::new)?;
 
             if let Some(rodata) = open_skel.maps.rodata_data.as_mut() {
-                if !trace_all && (cmd_pid != 0) {
-                    rodata.target_tgid = cmd_pid;
+                let pidns_detection = match target_pid_ns {
+                    Some(inum) => pid_namespace::Detection::with_target_override(inum),
+                    None => pid_namespace::detect()?,
+                };
+                rodata.current_is_init_pidns = pidns_detection.current_is_init_pidns();
+                if let Some(current_pidns_inum) = pidns_detection.current_pidns_inum() {
+                    rodata.current_pidns_inum = current_pidns_inum;
+                }
+                if verbose {
+                    pidns_detection.log();
+                }
+
+                if !trace_all {
+                    rodata.target_tgid = target_tgid.unwrap_or(cmd_pid);
                 }
 
                 if trace_best_effort {
@@ -753,7 +773,9 @@ impl<I> TraceEvents<I> {
                 let ev = if let Some((old_policy, sched_policy)) =
                     self.pending_policy.remove(&event.id.pid)
                 {
-                    let policy_changed = sched_policy.policy_num() != old_policy;
+                    let old_policy_known = old_policy != SchedulingPolicy::Unknown.policy_num();
+                    let policy_changed =
+                        old_policy_known && sched_policy.policy_num() != old_policy;
                     let follow_up = if policy_changed {
                         EventData::SchedulerChanged { sched_policy }
                     } else {
@@ -992,3 +1014,4 @@ impl EventSource for BPFSource<'_> {
 
 mod assembler;
 pub mod dd;
+mod pid_namespace;

@@ -95,18 +95,14 @@ mod build {
 fn main() {
     build::build();
 
-    // Configure and run protobuf compilation
-    let mut config = prost_build::Config::new();
-
-    // Optional: Configure the output
-    config.bytes(["."]); // Use bytes::Bytes instead of Vec<u8>
-    config.type_attribute(".", "#[derive(::serde::Serialize, ::serde::Deserialize)]");
-
-    // Compile the protos
-    config
-        .compile_protos(&["src/proto/trace_event.proto"], &["src/proto"])
-        .unwrap();
-
-    // Tell cargo to rerun if proto files change
-    println!("cargo:rerun-if-changed=src/proto/trace_event.proto");
+    #[cfg(feature = "proto")]
+    {
+        let mut config = prost_build::Config::new();
+        config.bytes(["."]);
+        config.type_attribute(".", "#[derive(::serde::Serialize, ::serde::Deserialize)]");
+        config
+            .compile_protos(&["src/proto/trace_event.proto"], &["src/proto"])
+            .unwrap();
+        println!("cargo:rerun-if-changed=src/proto/trace_event.proto");
+    }
 }

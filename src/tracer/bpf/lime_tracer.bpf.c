@@ -38,6 +38,7 @@ extern void bpf_task_release(struct task_struct *task) __ksym;
 /* SCHED_ISO: reserved but not implemented yet */
 #define SCHED_IDLE 5
 #define SCHED_DEADLINE 6
+#define SCHED_POLICY_UNKNOWN ((u32)-1)
 
 #define ENOMEM 132
 
@@ -53,8 +54,11 @@ struct lime_event _event = {0};
 
 volatile const u32 sched_policy_mask = 0x46;
 volatile const int target_tgid = 0;
+volatile const u32 current_pidns_inum = 0;
+volatile const bool current_is_init_pidns = false;
 
-static inline bool test_bit(u8 bit, u32 word) { return (1 << bit) & word; }
+#define PID_NS_MAX_LEVEL 32
+#define PID_NS_LEVEL_COUNT (PID_NS_MAX_LEVEL + 1)
 
 struct {
   __uint(type, BPF_MAP_TYPE_HASH);
@@ -94,6 +98,44 @@ struct task_struct___pre_5_14 {
   long int state;
 };
 
+static inline bool test_bit(u8 bit, u32 word) { return (1 << bit) & word; }
+
+static inline u64 make_pid_tgid(u32 tgid, u32 pid) {
+  return ((u64)tgid << 32) | pid;
+}
+
+static inline u64 make_pid_only_pid_tgid(u32 pid) {
+  return make_pid_tgid(pid, pid);
+}
+
+static inline pid_t get_current_pid_key(void) {
+  return (pid_t)bpf_get_current_pid_tgid();
+}
+
+static inline u32 clamp_pid_ns_level(unsigned int level) {
+  if (level > PID_NS_MAX_LEVEL)
+    return PID_NS_MAX_LEVEL;
+
+  return level;
+}
+
+static inline void mark_current_filter_as(void) {
+  pid_t key = get_current_pid_key();
+  u8 val = 0;
+
+  bpf_map_update_elem(&filter_as, &key, &val, BPF_NOEXIST);
+}
+
+static inline bool consume_current_filter_as(void) {
+  pid_t key = get_current_pid_key();
+
+  if (!bpf_map_lookup_elem(&filter_as, &key))
+    return false;
+
+  bpf_map_delete_elem(&filter_as, &key);
+  return true;
+}
+
 static inline bool is_rt_sched_policy(u32 policy) {
   return test_bit((u8)policy, sched_policy_mask);
 }
@@ -112,16 +154,6 @@ static inline u32 get_sched_priority(struct task_struct *t) {
   bpf_core_read(&prio, sizeof(prio), &t->rt_priority);
 
   return prio;
-}
-
-static inline u32 get_ppid(struct task_struct *t) {
-  struct task_struct *p;
-  u32 ppid;
-
-  bpf_core_read(&p, sizeof(struct task_struct *), &t->real_parent);
-  bpf_core_read(&ppid, sizeof(ppid), &p->pid);
-
-  return ppid;
 }
 
 static inline u32 get_task_state(struct task_struct *t) {
@@ -143,19 +175,151 @@ static inline u32 get_task_cpu(struct task_struct *t) {
   return cpu;
 }
 
+static inline int read_pid_upid(struct pid *pid, u32 level,
+                                struct upid *upid) {
+  u32 numbers_offset = bpf_core_field_offset(struct pid, numbers);
+  char *addr = (char *)pid + numbers_offset + (level * sizeof(struct upid));
+
+  return bpf_probe_read_kernel(upid, sizeof(*upid), addr);
+}
+
+static inline u32 get_pidns_inum_at_level(struct pid *pid, u32 level) {
+  struct upid upid = {};
+  struct pid_namespace *ns = NULL;
+  u32 inum = 0;
+
+  if (!pid)
+    return 0;
+
+  if (level > PID_NS_MAX_LEVEL)
+    return 0;
+
+  if (read_pid_upid(pid, level, &upid) < 0)
+    return 0;
+
+  ns = upid.ns;
+  if (!ns)
+    return 0;
+
+  bpf_core_read(&inum, sizeof(inum), &ns->ns.inum);
+  return inum;
+}
+
+static inline u32 get_pid_active_pidns_inum(struct pid *pid) {
+  unsigned int level = 0;
+
+  if (!pid)
+    return 0;
+
+  bpf_core_read(&level, sizeof(level), &pid->level);
+  level = clamp_pid_ns_level(level);
+
+  return get_pidns_inum_at_level(pid, level);
+}
+
+static inline u32 get_pid_nr_in_current_ns(struct pid *pid) {
+  unsigned int level = 0;
+
+  if (!pid)
+    return 0;
+
+  bpf_core_read(&level, sizeof(level), &pid->level);
+  level = clamp_pid_ns_level(level);
+
+  if (!current_pidns_inum)
+    return 0;
+
+  for (int i = 0; i < PID_NS_LEVEL_COUNT; i++) {
+    struct upid upid = {};
+    struct pid_namespace *ns = NULL;
+    u32 inum = 0;
+
+    if (i > level)
+      break;
+
+    if (read_pid_upid(pid, (u32)i, &upid) < 0)
+      continue;
+
+    ns = upid.ns;
+    if (!ns)
+      continue;
+
+    bpf_core_read(&inum, sizeof(inum), &ns->ns.inum);
+    if (inum == current_pidns_inum)
+      return upid.nr > 0 ? (u32)upid.nr : 0;
+  }
+
+  return 0;
+}
+
+static inline struct pid *get_task_thread_pid(struct task_struct *t) {
+  struct pid *pid = NULL;
+
+  if (!t)
+    return NULL;
+
+  bpf_core_read(&pid, sizeof(struct pid *), &t->thread_pid);
+  return pid;
+}
+
 static inline u64 get_pid_tgid(struct task_struct *t) {
-  u64 ret;
-  u32 pid;
-  u32 tgid;
+  if (!t)
+    return 0;
 
-  bpf_core_read(&tgid, sizeof(tgid), &t->tgid);
-  bpf_core_read(&pid, sizeof(pid), &t->pid);
+  if (current_is_init_pidns) {
+    u32 pid, tgid;
 
-  ret = tgid;
-  ret <<= 32;
-  ret += pid;
+    bpf_core_read(&pid, sizeof(pid), &t->pid);
+    bpf_core_read(&tgid, sizeof(tgid), &t->tgid);
+    if (!pid || !tgid)
+      return 0;
 
-  return ret;
+    return make_pid_tgid(tgid, pid);
+  }
+
+  struct task_struct *group_leader = NULL;
+  struct pid *thread_pid = get_task_thread_pid(t);
+  u32 pid, tgid;
+
+  bpf_core_read(&group_leader, sizeof(struct task_struct *), &t->group_leader);
+  struct pid *tgid_pid = get_task_thread_pid(group_leader);
+
+  pid = get_pid_nr_in_current_ns(thread_pid);
+  tgid = get_pid_nr_in_current_ns(tgid_pid);
+  if (!pid || !tgid)
+    return 0;
+
+  return make_pid_tgid(tgid, pid);
+}
+
+static inline u32 get_ppid(struct task_struct *t) {
+  struct task_struct *parent = NULL;
+  u32 ppid = 0;
+
+  if (!t)
+    return 0;
+
+  bpf_core_read(&parent, sizeof(struct task_struct *), &t->real_parent);
+  if (!parent)
+    return 0;
+
+  if (current_is_init_pidns) {
+    bpf_core_read(&ppid, sizeof(ppid), &parent->pid);
+    return ppid;
+  }
+
+  return get_pid_nr_in_current_ns(get_task_thread_pid(parent));
+}
+
+static inline bool is_task_active_in_current_pidns(struct task_struct *t) {
+  struct pid *pid = get_task_thread_pid(t);
+  u32 active_inum = get_pid_active_pidns_inum(pid);
+  u32 current_inum = current_pidns_inum;
+
+  if (!current_inum)
+    current_inum = get_pidns_inum_at_level(pid, 0);
+
+  return active_inum && current_inum && active_inum == current_inum;
 }
 
 static inline void fill_sched_attr(struct task_struct *t,
@@ -191,14 +355,14 @@ static inline void fill_sched_attr(struct task_struct *t,
 }
 
 static inline void fill_affinity_mask(struct task_struct *t,
-                                      __u64 mask[CPUMASK_U64_COUNT]) {
+                                      u64 mask[CPUMASK_U64_COUNT]) {
   int cpu_count = 0;
-  __u32 remaining_cpus;
+  u32 remaining_cpus;
 
   if (!t || !mask)
     return;
 
-  bpf_core_read(mask, sizeof(__u64) * CPUMASK_U64_COUNT, &t->cpus_mask.bits[0]);
+  bpf_core_read(mask, sizeof(u64) * CPUMASK_U64_COUNT, &t->cpus_mask.bits[0]);
 
   bpf_core_read(&cpu_count, sizeof(cpu_count), &t->nr_cpus_allowed);
 
@@ -219,17 +383,17 @@ static inline void fill_affinity_mask(struct task_struct *t,
       continue;
     }
 
-    __u32 set_bits = __builtin_popcountll(mask[i]);
+    u32 set_bits = __builtin_popcountll(mask[i]);
     if (set_bits <= remaining_cpus) {
       remaining_cpus -= set_bits;
       continue;
     }
 
-    __u64 word = mask[i];
-    __u64 kept = 0;
+    u64 word = mask[i];
+    u64 kept = 0;
 
     for (int bit_count = 0; bit_count < 64; bit_count++) {
-      __u64 bit;
+      u64 bit;
 
       if (remaining_cpus == 0)
         break;
@@ -245,22 +409,27 @@ static inline void fill_affinity_mask(struct task_struct *t,
 }
 
 static inline struct task_struct *
-get_target_task(u32 target_pid, u64 current_pid_tgid,
-                struct task_struct **ref_task) {
+get_target_task(u32 target_pid, struct task_struct **ref_task) {
+  struct task_struct *current =
+      (struct task_struct *)bpf_get_current_task_btf();
+  u32 current_pid = (u32)get_pid_tgid(current);
+
   *ref_task = NULL;
 
-  if (!target_pid || target_pid == (u32)current_pid_tgid)
-    return (struct task_struct *)bpf_get_current_task_btf();
+  if (!target_pid || target_pid == current_pid)
+    return current;
 
 #if HAS_BPF_TASK_KFUNC
-  struct task_struct *task = bpf_task_from_pid((s32)target_pid);
-  if (task)
-    *ref_task = task;
+  if (current_is_init_pidns && is_task_active_in_current_pidns(current)) {
+    struct task_struct *task = bpf_task_from_pid((s32)target_pid);
+    if (task)
+      *ref_task = task;
 
-  return task;
-#else
-  return NULL;
+    return task;
+  }
 #endif
+
+  return NULL;
 }
 
 static inline void release_task(struct task_struct *ref_task) {
@@ -280,21 +449,54 @@ struct sched_target_ctx {
   u64 dst_pid_tgid;
 };
 
-static inline void prepare_sched_target(pid_t requested_pid, u64 pid_tgid,
+static inline void prepare_sched_target(pid_t requested_pid,
                                         struct sched_target_ctx *ctx) {
-  struct task_struct *target = get_target_task(
-      requested_pid ? requested_pid : (u32)pid_tgid, pid_tgid, &ctx->ref_task);
-  bool same_task = (!requested_pid || requested_pid == (u32)pid_tgid);
+  struct task_struct *current =
+      (struct task_struct *)bpf_get_current_task_btf();
+  u64 current_pid_tgid = get_pid_tgid(current);
+  u32 current_pid = (u32)current_pid_tgid;
+  u32 lookup_pid = current_pid;
+  struct task_struct *target;
+  bool same_task;
+
+  ctx->task = NULL;
+  ctx->ref_task = NULL;
+  ctx->same_task = false;
+  ctx->target_is_real = false;
+  ctx->dst_pid_tgid = 0;
+
+  if (requested_pid < 0)
+    return;
+
+  if (requested_pid)
+    lookup_pid = (u32)requested_pid;
+
+  target = get_target_task(lookup_pid, &ctx->ref_task);
+  same_task = (!requested_pid || (u32)requested_pid == current_pid);
 
   if (!target && same_task)
-    target = (struct task_struct *)bpf_get_current_task_btf();
+    target = current;
 
   ctx->task = target;
   ctx->same_task = same_task;
   ctx->target_is_real = target && (ctx->ref_task || same_task);
-  ctx->dst_pid_tgid =
-      ctx->target_is_real ? get_pid_tgid(target)
-                          : (requested_pid ? (u64)requested_pid : pid_tgid);
+  if (ctx->target_is_real) {
+    ctx->dst_pid_tgid = get_pid_tgid(target);
+    return;
+  }
+
+  if (!requested_pid) {
+    ctx->dst_pid_tgid = current_pid_tgid;
+    return;
+  }
+
+  if (!is_task_active_in_current_pidns(current))
+    return;
+
+  if (target_tgid && target_tgid != requested_pid)
+    return;
+
+  ctx->dst_pid_tgid = make_pid_only_pid_tgid((u32)requested_pid);
 }
 
 static inline u64 now() { return bpf_ktime_get_boot_ns(); }
@@ -352,22 +554,24 @@ static inline void emit_process_info_event(struct task_struct *t) {
 
 #pragma unroll
   for (int idx = 0; idx < LIME_CMD_CHUNK_COUNT; idx++) {
-    unsigned long offset = (__u64)idx * LIME_CMD_CHUNK_LEN;
+    unsigned long offset = (u64)idx * LIME_CMD_CHUNK_LEN;
 
     if (offset >= total_bytes)
       break;
 
-    __u64 chunk_len = LIME_CMD_CHUNK_LEN;
+    u32 chunk_len = LIME_CMD_CHUNK_LEN;
     if (offset + chunk_len > total_bytes)
-      chunk_len = (total_bytes - offset);
-
-    // Hard clamp for verifier and helper argument bounds.
-    if (chunk_len > sizeof(event->evd.process_info_chunk.chunk))
-      chunk_len = sizeof(event->evd.process_info_chunk.chunk);
+      chunk_len = (u32)(total_bytes - offset);
 
     event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
     if (!event)
       break;
+
+    // Clamp after ringbuf_reserve to silence verifier false-positive;
+    // barrier_var anchors the verifier's bounds re-evaluation here.
+    barrier_var(chunk_len);
+    if (chunk_len > sizeof(event->evd.process_info_chunk.chunk))
+      chunk_len = sizeof(event->evd.process_info_chunk.chunk);
 
     event->ev_type = PROCESS_INFO_CMD_CHUNK;
     event->pid_tgid = pid_tgid;
@@ -413,10 +617,10 @@ static inline void emit_sched_policy_update_event(struct task_struct *t) {
 
 static inline void emit_affinity_update_event(struct task_struct *t) {
   struct lime_event *event;
-  __u64 mask[CPUMASK_U64_COUNT] = {};
-  __u64 pid_tgid;
+  u64 mask[CPUMASK_U64_COUNT] = {};
+  u64 pid_tgid;
   u64 ts;
-  const __u32 chunk_count = LIME_AFFINITY_CHUNK_COUNT;
+  const u32 chunk_count = LIME_AFFINITY_CHUNK_COUNT;
 
   if (!t)
     return;
@@ -437,9 +641,9 @@ static inline void emit_affinity_update_event(struct task_struct *t) {
 
 #pragma unroll
   for (int chunk = 0; chunk < LIME_AFFINITY_CHUNK_COUNT; chunk++) {
-    __u32 word_base = chunk * LIME_AFFINITY_CHUNK_WORDS;
-    __u32 remaining_words = 0;
-    __u32 copy_words = 0;
+    u32 word_base = chunk * LIME_AFFINITY_CHUNK_WORDS;
+    u32 remaining_words = 0;
+    u32 copy_words = 0;
 
     if (word_base >= CPUMASK_U64_COUNT)
       break;
@@ -459,10 +663,10 @@ static inline void emit_affinity_update_event(struct task_struct *t) {
     event->pid_tgid = pid_tgid;
     event->ts = ts;
     event->evd.affinity_update_chunk.chunk_len =
-        copy_words * sizeof(__u64);
+        copy_words * sizeof(u64);
 
     for (int i = 0; i < LIME_AFFINITY_CHUNK_WORDS; i++) {
-      __u32 word_idx = word_base + i;
+      u32 word_idx = word_base + i;
       if (i < copy_words && word_idx < CPUMASK_U64_COUNT) {
         event->evd.affinity_update_chunk.mask[i] = mask[word_idx];
       } else {
@@ -528,7 +732,7 @@ static int filter_out_task(struct task_struct *t) {
     tgid = pid_tgid >> 32;
     ppid = get_ppid(t);
 
-    if ((target_tgid != tgid) && (target_tgid != ppid))
+    if ((target_tgid != tgid) && (target_tgid != pid) && (target_tgid != ppid))
       return 1;
   }
 
@@ -675,8 +879,10 @@ SEC("tp_btf/sched_process_exit")
 int on_sched_process_exit(u64 *ctx) {
   struct task_struct *t = (struct task_struct *)ctx[0];
   u64 pid_tgid = get_pid_tgid(t);
+  u32 pid = (u32)pid_tgid;
 
-  bpf_map_delete_elem(&throttled, &pid_tgid);
+  if (pid)
+    bpf_map_delete_elem(&throttled, &pid);
 
   if (filter_out_task(t))
     return 0;
@@ -715,35 +921,6 @@ int on_sched_process_fork(u64 *ctx) {
   return 0;
 }
 
-struct rt_thread_info _info = {};
-
-/*
-
-SEC("iter/task")
-int dump_rt_threads(struct bpf_iter__task_file *ctx) {
-    pid_t pid;
-    u8 val = 1;
-    struct rt_thread_info info = {0};
-    struct seq_file *seq = ctx->meta->seq;
-    struct task_struct *task = ctx->task;
-
-    if (filter_out_task(task))
-        return 0;
-
-    bpf_core_read(&pid, sizeof(pid), &task->pid);
-    bpf_map_update_elem(&known_pids, &pid, &val, 0);
-
-    info.pid_tgid = get_pid_tgid(task);
-    info.cpu = get_task_cpu(task);
-    info.policy = get_sched_policy(task);
-    info.prio = get_sched_priority(task);
-
-    bpf_seq_write(seq, &info, sizeof(info));
-
-    return 0;
-}
-*/
-
 struct enter_clock_nanosleep_args {
   unsigned short common_type;
   unsigned char common_flags;
@@ -778,7 +955,7 @@ static int handle_exit_arrival_site(struct exit_ar_args *ctx) {
     return -ENOMEM;
 
   ts = now();
-  pid_tgid = bpf_get_current_pid_tgid();
+  pid_tgid = get_pid_tgid(t);
 
   event->ev_type = EXIT_AS;
   event->pid_tgid = pid_tgid;
@@ -800,8 +977,9 @@ struct sched_setscheduler_args {
 SEC("tracepoint/syscalls/sys_enter_sched_setscheduler")
 int handle_sys_enter_sched_setscheduler(struct sched_setscheduler_args *ctx) {
   struct lime_event *event;
-  u64 pid_tgid, dst_pid_tgid;
-  u32 pid = ctx->pid;
+  u64 dst_pid_tgid;
+  pid_t pid = (pid_t)ctx->pid;
+  pid_t change_key;
   int prio = 0;
   struct sched_param *p;
   long err;
@@ -810,10 +988,16 @@ int handle_sys_enter_sched_setscheduler(struct sched_setscheduler_args *ctx) {
   if (!ctx->params)
     return 0;
 
-  pid_tgid = bpf_get_current_pid_tgid();
-  prepare_sched_target(pid, pid_tgid, &target_ctx);
+  change_key = get_current_pid_key();
+  prepare_sched_target(pid, &target_ctx);
 
   if (target_ctx.same_task && target_ctx.task && filter_out_task(target_ctx.task)) {
+    release_task(target_ctx.ref_task);
+    return 0;
+  }
+
+  dst_pid_tgid = target_ctx.dst_pid_tgid;
+  if (!dst_pid_tgid) {
     release_task(target_ctx.ref_task);
     return 0;
   }
@@ -825,10 +1009,9 @@ int handle_sys_enter_sched_setscheduler(struct sched_setscheduler_args *ctx) {
   }
 
   event->ts = now();
-  dst_pid_tgid = target_ctx.dst_pid_tgid;
   event->pid_tgid = dst_pid_tgid;
 
-  err = bpf_map_update_elem(&changing, &pid_tgid, &dst_pid_tgid, BPF_NOEXIST);
+  err = bpf_map_update_elem(&changing, &change_key, &dst_pid_tgid, BPF_NOEXIST);
   if (err < 0) {
     bpf_ringbuf_discard(event, 0);
     release_task(target_ctx.ref_task);
@@ -837,18 +1020,17 @@ int handle_sys_enter_sched_setscheduler(struct sched_setscheduler_args *ctx) {
 
   event->ev_type = ENTER_SCHED_SETSCHEDULER;
   event->evd.sched_attr.policy = ctx->policy;
-  if (target_ctx.task)
+  if (target_ctx.target_is_real && target_ctx.task)
     event->evd.sched_attr.old_policy = get_sched_policy(target_ctx.task);
   else
-    event->evd.sched_attr.old_policy =
-        get_sched_policy((struct task_struct *)bpf_get_current_task_btf());
+    event->evd.sched_attr.old_policy = SCHED_POLICY_UNKNOWN;
 
   switch (ctx->policy) {
   case SCHED_FIFO:
   case SCHED_RR:
     p = ctx->params;
     bpf_core_read_user(&prio, sizeof(prio), &p->sched_priority);
-    event->evd.sched_attr.attrs.rt.prio = (__u32)prio;
+    event->evd.sched_attr.attrs.rt.prio = (u32)prio;
     break;
 
   default:
@@ -862,24 +1044,25 @@ int handle_sys_enter_sched_setscheduler(struct sched_setscheduler_args *ctx) {
   return 0;
 }
 
-static inline int on_ret_change_scheduler(void *ctx, int retval) {
+static inline int on_ret_change_scheduler(int retval) {
   struct lime_event *event;
-  __u64 pidtgid = bpf_get_current_pid_tgid();
+  pid_t change_key = get_current_pid_key();
   struct task_struct *target = NULL;
   struct task_struct *ref_task = NULL;
   u32 target_pid = 0;
 
-  __u64 *dst_pidtgid = bpf_map_lookup_elem(&changing, &pidtgid);
+  u64 *dst_pidtgid = bpf_map_lookup_elem(&changing, &change_key);
   if (!dst_pidtgid) {
     return -1;
   }
 
   target_pid = (u32)(*dst_pidtgid);
-  target = get_target_task(target_pid, pidtgid, &ref_task);
+  target = get_target_task(target_pid, &ref_task);
 
   event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
 
   if (!event) {
+    bpf_map_delete_elem(&changing, &change_key);
     release_task(ref_task);
     return -ENOMEM;
   }
@@ -898,7 +1081,7 @@ static inline int on_ret_change_scheduler(void *ctx, int retval) {
   else
     __builtin_memset(&event->evd.sched_attr, 0, sizeof(event->evd.sched_attr));
 
-  bpf_map_delete_elem(&changing, &pidtgid);
+  bpf_map_delete_elem(&changing, &change_key);
 
   submit_event(event);
 
@@ -916,7 +1099,7 @@ SEC("tracepoint/syscalls/sys_exit_sched_setscheduler")
 int handle_sys_exit_sched_setscheduler(struct exit_ar_args *ctx) {
   int retval = ctx->ret;
 
-  return on_ret_change_scheduler(ctx, retval);
+  return on_ret_change_scheduler(retval);
 }
 
 struct sched_setattr_args {
@@ -929,8 +1112,9 @@ struct sched_setattr_args {
 SEC("tracepoint/syscalls/sys_enter_sched_setattr")
 int handle_sys_enter_sched_setattr(struct sched_setattr_args *ctx) {
   struct lime_event *event;
-  u64 pid_tgid, dst_pid_tgid;
-  u32 pid = ctx->pid;
+  u64 dst_pid_tgid;
+  pid_t pid = ctx->pid;
+  pid_t change_key;
   u32 prio = 0;
   int policy;
   u64 runtime, period, deadline;
@@ -941,10 +1125,16 @@ int handle_sys_enter_sched_setattr(struct sched_setattr_args *ctx) {
   if (!attrs)
     return 0;
 
-  pid_tgid = bpf_get_current_pid_tgid();
-  prepare_sched_target(pid, pid_tgid, &target_ctx);
+  change_key = get_current_pid_key();
+  prepare_sched_target(pid, &target_ctx);
 
   if (target_ctx.same_task && target_ctx.task && filter_out_task(target_ctx.task)) {
+    release_task(target_ctx.ref_task);
+    return 0;
+  }
+
+  dst_pid_tgid = target_ctx.dst_pid_tgid;
+  if (!dst_pid_tgid) {
     release_task(target_ctx.ref_task);
     return 0;
   }
@@ -959,10 +1149,9 @@ int handle_sys_enter_sched_setattr(struct sched_setattr_args *ctx) {
   event->ts = now();
   event->ev_type = ENTER_SCHED_SETATTR;
 
-  dst_pid_tgid = target_ctx.dst_pid_tgid;
   event->pid_tgid = dst_pid_tgid;
 
-  err = bpf_map_update_elem(&changing, &pid_tgid, &dst_pid_tgid, BPF_NOEXIST);
+  err = bpf_map_update_elem(&changing, &change_key, &dst_pid_tgid, BPF_NOEXIST);
   if (err < 0) {
     bpf_ringbuf_discard(event, 0);
     release_task(target_ctx.ref_task);
@@ -971,11 +1160,10 @@ int handle_sys_enter_sched_setattr(struct sched_setattr_args *ctx) {
 
   bpf_core_read_user(&policy, sizeof(policy), &attrs->sched_policy);
   event->evd.sched_attr.policy = policy;
-  if (target_ctx.task)
+  if (target_ctx.target_is_real && target_ctx.task)
     event->evd.sched_attr.old_policy = get_sched_policy(target_ctx.task);
   else
-    event->evd.sched_attr.old_policy =
-        get_sched_policy((struct task_struct *)bpf_get_current_task_btf());
+    event->evd.sched_attr.old_policy = SCHED_POLICY_UNKNOWN;
 
   switch (policy) {
   case SCHED_FIFO:
@@ -1009,11 +1197,11 @@ SEC("tracepoint/syscalls/sys_exit_sched_setattr")
 int handle_sys_exit_sched_setattr(struct exit_ar_args *ctx) {
   int retval = ctx->ret;
 
-  return on_ret_change_scheduler(ctx, retval);
+  return on_ret_change_scheduler(retval);
 }
 
 struct enter_setaffinity_args {
-  __u64 unused[2];
+  u64 unused[2];
   pid_t pid;           // First syscall arg
   size_t cpusetsize;   // Second syscall arg
   const unsigned long *user_mask_ptr;  // Third syscall arg
@@ -1022,14 +1210,21 @@ struct enter_setaffinity_args {
 SEC("tracepoint/syscalls/sys_enter_sched_setaffinity")
 int handle_sys_enter_sched_setaffinity(struct enter_setaffinity_args *ctx) {
   struct lime_event *event;
-  u64 pid_tgid, dst_pid_tgid;
+  u64 dst_pid_tgid;
+  pid_t change_key;
   long err;
   struct sched_target_ctx target_ctx = {};
 
-  pid_tgid = bpf_get_current_pid_tgid();
-  prepare_sched_target(ctx->pid, pid_tgid, &target_ctx);
+  change_key = get_current_pid_key();
+  prepare_sched_target(ctx->pid, &target_ctx);
 
   if (target_ctx.task && filter_out_task(target_ctx.task)) {
+    release_task(target_ctx.ref_task);
+    return 0;
+  }
+
+  dst_pid_tgid = target_ctx.dst_pid_tgid;
+  if (!dst_pid_tgid) {
     release_task(target_ctx.ref_task);
     return 0;
   }
@@ -1042,10 +1237,9 @@ int handle_sys_enter_sched_setaffinity(struct enter_setaffinity_args *ctx) {
 
   event->ts = now();
   event->ev_type = ENTER_SCHED_SETAFFINITY;
-  dst_pid_tgid = target_ctx.dst_pid_tgid;
   event->pid_tgid = dst_pid_tgid;
 
-  err = bpf_map_update_elem(&changing, &pid_tgid, &dst_pid_tgid, BPF_NOEXIST);
+  err = bpf_map_update_elem(&changing, &change_key, &dst_pid_tgid, BPF_NOEXIST);
   if (err < 0) {
     bpf_ringbuf_discard(event, 0);
     release_task(target_ctx.ref_task);
@@ -1061,31 +1255,31 @@ int handle_sys_enter_sched_setaffinity(struct enter_setaffinity_args *ctx) {
 SEC("tracepoint/syscalls/sys_exit_sched_setaffinity")
 int handle_sys_exit_sched_setaffinity(struct exit_ar_args *ctx) {
   int retval = ctx->ret;
-  u64 pid_tgid;
+  pid_t change_key;
   struct lime_event *event;
   struct task_struct *target = NULL;
   struct task_struct *ref_task = NULL;
   u32 target_pid = 0;
 
-  pid_tgid = bpf_get_current_pid_tgid();
+  change_key = get_current_pid_key();
 
-  u64 *dst_pid_tgid = bpf_map_lookup_elem(&changing, &pid_tgid);
+  u64 *dst_pid_tgid = bpf_map_lookup_elem(&changing, &change_key);
   if (!dst_pid_tgid) {
     return -1;
   }
 
   target_pid = (u32)(*dst_pid_tgid);
-  target = get_target_task(target_pid, pid_tgid, &ref_task);
+  target = get_target_task(target_pid, &ref_task);
 
   if (target && filter_out_task(target)) {
-    bpf_map_delete_elem(&changing, &pid_tgid);
+    bpf_map_delete_elem(&changing, &change_key);
     release_task(ref_task);
     return 0;
   }
 
   event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
   if (!event) {
-    bpf_map_delete_elem(&changing, &pid_tgid);
+    bpf_map_delete_elem(&changing, &change_key);
     release_task(ref_task);
     return -ENOMEM;
   }
@@ -1111,7 +1305,7 @@ int handle_sys_exit_sched_setaffinity(struct exit_ar_args *ctx) {
 
   release_task(ref_task);
 
-  bpf_map_delete_elem(&changing, &pid_tgid);
+  bpf_map_delete_elem(&changing, &change_key);
 
   return 0;
 }
@@ -1164,7 +1358,7 @@ int on_sched_yield(struct sched_yield_args *ctx) {
 
   t = (struct task_struct *)bpf_get_current_task_btf();
 
-  policy = t->policy;
+  policy = get_sched_policy(t);
 
   if (policy != SCHED_DEADLINE) {
     return 0;
@@ -1174,7 +1368,7 @@ int on_sched_yield(struct sched_yield_args *ctx) {
     return 0;
 
   ts = now();
-  pid_tgid = bpf_get_current_pid_tgid();
+  pid_tgid = get_pid_tgid(t);
 
   hrt = (u64)&t->dl.dl_timer;
 
@@ -1201,7 +1395,7 @@ int on_sys_exit_sched_yield(void *ctx) {
   int policy;
 
   t = (struct task_struct *)bpf_get_current_task_btf();
-  policy = t->policy;
+  policy = get_sched_policy(t);
 
   if (policy != SCHED_DEADLINE) {
     return 0;
@@ -1214,7 +1408,6 @@ SEC("tracepoint/syscalls/sys_enter_clock_nanosleep")
 int on_sys_enter_clock_nanosleep(struct enter_clock_nanosleep_args *ctx) {
   u64 ts, secs = 1, nsecs = 1;
   u64 pid;
-  u32 policy;
 
   struct task_struct *t = NULL;
   struct lime_event *event;
@@ -1232,7 +1425,7 @@ int on_sys_enter_clock_nanosleep(struct enter_clock_nanosleep_args *ctx) {
   if (!event)
     return -ENOMEM;
 
-  pid = bpf_get_current_pid_tgid();
+  pid = get_pid_tgid(t);
 
   event->ev_type = ENTER_CLOCK_NANOSLEEP;
   event->pid_tgid = pid;
@@ -1267,7 +1460,6 @@ SEC("tracepoint/syscalls/sys_enter_nanosleep")
 int on_sys_enter_nanosleep(struct enter_nanosleep_args *ctx) {
   u64 ts, secs = 1, nsecs = 1;
   u64 pid;
-  u32 policy;
 
   struct task_struct *t = NULL;
   struct lime_event *event;
@@ -1283,7 +1475,7 @@ int on_sys_enter_nanosleep(struct enter_nanosleep_args *ctx) {
   if (!event)
     return -ENOMEM;
 
-  pid = bpf_get_current_pid_tgid();
+  pid = get_pid_tgid(t);
 
   event->ev_type = ENTER_NANOSLEEP;
   event->pid_tgid = pid;
@@ -1330,7 +1522,7 @@ int on_sys_enter_select(struct select_args *ctx) {
 
   event->ev_type = ENTER_SELECT;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_select.inp = (u64)ctx->inp;
 
   if (tvp == NULL) {
@@ -1377,7 +1569,7 @@ int on_sys_enter_pselect6(struct pselect6_args *ctx) {
 
   event->ev_type = ENTER_PSELECT6;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_select.inp = (u64)ctx->inp;
 
   if (tsp == NULL) {
@@ -1427,7 +1619,7 @@ int on_sys_enter_poll(struct poll_args *ctx) {
 
   event->ev_type = ENTER_POLL;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_poll.pfds = (u64)ctx->pfds;
   event->evd.enter_poll.timeout_msecs = (int)ctx->timeout_msecs;
 
@@ -1460,14 +1652,19 @@ int on_sys_enter_ppoll(struct ppoll_args *ctx) {
 
   event->ev_type = ENTER_PPOLL;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_ppoll.pfds = (u64)ctx->pfds;
 
-  bpf_core_read_user(&event->evd.enter_ppoll.tv_sec,
-                     sizeof(event->evd.enter_ppoll.tv_sec), &tsp->tv_sec);
+  if (tsp == NULL) {
+    event->evd.enter_ppoll.tv_sec = -1;
+    event->evd.enter_ppoll.tv_nsec = 0;
+  } else {
+    bpf_core_read_user(&event->evd.enter_ppoll.tv_sec,
+                       sizeof(event->evd.enter_ppoll.tv_sec), &tsp->tv_sec);
 
-  bpf_core_read_user(&event->evd.enter_ppoll.tv_nsec,
-                     sizeof(event->evd.enter_ppoll.tv_nsec), &tsp->tv_nsec);
+    bpf_core_read_user(&event->evd.enter_ppoll.tv_nsec,
+                       sizeof(event->evd.enter_ppoll.tv_nsec), &tsp->tv_nsec);
+  }
 
   submit_event(event);
 
@@ -1475,30 +1672,34 @@ int on_sys_enter_ppoll(struct ppoll_args *ctx) {
 }
 
 static inline struct file *get_struct_file(struct task_struct *t, int fd) {
-  struct files_struct *f;
-  struct fdtable *fdt;
-  struct file **fdd;
-  struct file *file;
+  struct files_struct *f = NULL;
+  struct fdtable *fdt = NULL;
+  struct file **fdd = NULL;
+  struct file *file = NULL;
+  unsigned int max_fds = 0;
+  long ret;
 
-  if (fd < 0) {
+  if (!t || fd < 0)
     return NULL;
-  }
 
-  // get files_struct
   bpf_core_read(&f, sizeof(struct files_struct *), &t->files);
-
-  // get fdt table
-  bpf_probe_read(&fdt, sizeof(struct fdtable *), (void *)&f->fdt);
-
-  // get files table
-  long ret = bpf_probe_read(&fdd, sizeof(struct file **), (void *)&fdt->fd);
-
-  if (ret) {
-    bpf_printk("bpf_probe_read failed: %d\n", ret);
+  if (!f)
     return NULL;
-  }
 
-  bpf_probe_read(&file, sizeof(struct file *), (void *)&fdd[fd]);
+  bpf_core_read(&fdt, sizeof(struct fdtable *), &f->fdt);
+  if (!fdt)
+    return NULL;
+
+  bpf_core_read(&max_fds, sizeof(max_fds), &fdt->max_fds);
+  if ((unsigned int)fd >= max_fds)
+    return NULL;
+
+  ret = bpf_core_read(&fdd, sizeof(struct file **), &fdt->fd);
+  if (ret || !fdd)
+    return NULL;
+
+  if (bpf_probe_read_kernel(&file, sizeof(struct file *), (void *)&fdd[fd]) < 0)
+    return NULL;
 
   return file;
 }
@@ -1520,14 +1721,11 @@ SEC("tracepoint/syscalls/sys_enter_read")
 int on_sys_enter_read(struct read_args *ctx) {
   struct task_struct *t = NULL;
   struct lime_event *event;
-  u64 pid_tgid;
   struct file *f;
   struct inode *inode;
   umode_t mode;
   unsigned int flags;
-  u8 val = 0;
   enum event_type ev_type = 0;
-  int fd;
 
   t = (struct task_struct *)bpf_get_current_task();
 
@@ -1535,6 +1733,8 @@ int on_sys_enter_read(struct read_args *ctx) {
     return 0;
 
   f = get_struct_file(t, ctx->fd);
+  if (!f)
+    return 0;
 
   // Check file is not in non-blocking mode
   bpf_core_read(&flags, sizeof(flags), &f->f_flags);
@@ -1573,12 +1773,9 @@ int on_sys_enter_read(struct read_args *ctx) {
   event->ts = now();
   event->ev_type = ev_type;
 
-  pid_tgid = bpf_get_current_pid_tgid();
-
-  event->pid_tgid = pid_tgid;
+  mark_current_filter_as();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_read.fd = ctx->fd;
-
-  bpf_map_update_elem(&filter_as, &pid_tgid, &val, BPF_NOEXIST);
 
   submit_event(event);
 
@@ -1593,13 +1790,8 @@ int on_sys_exit_ppoll(void *ctx) { return handle_exit_arrival_site(ctx); }
 
 SEC("tracepoint/syscalls/sys_exit_read")
 int on_sys_exit_read(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
@@ -1609,7 +1801,7 @@ struct accept_args {
   int fd;
 };
 
-int __on_enter_accept(struct accept_args *ctx) {
+int __on_enter_accept(int fd) {
   struct task_struct *t = NULL;
   struct lime_event *event;
 
@@ -1624,8 +1816,8 @@ int __on_enter_accept(struct accept_args *ctx) {
 
   event->ev_type = ENTER_ACCEPT;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
-  event->evd.enter_accept.sock_fd = ctx->fd;
+  event->pid_tgid = get_pid_tgid(t);
+  event->evd.enter_accept.sock_fd = fd;
 
   submit_event(event);
 
@@ -1633,10 +1825,10 @@ int __on_enter_accept(struct accept_args *ctx) {
 }
 
 SEC("tracepoint/syscalls/sys_enter_accept")
-int on_enter_accept(struct accept_args *ctx) { return __on_enter_accept(ctx); }
+int on_enter_accept(struct accept_args *ctx) { return __on_enter_accept(ctx->fd); }
 
 SEC("tracepoint/syscalls/sys_enter_accept4")
-int on_enter_accept4(struct accept_args *ctx) { return __on_enter_accept(ctx); }
+int on_enter_accept4(struct accept_args *ctx) { return __on_enter_accept(ctx->fd); }
 
 SEC("tracepoint/syscalls/sys_exit_accept")
 int on_sys_exit_accept(void *ctx) { return handle_exit_arrival_site(ctx); }
@@ -1671,8 +1863,6 @@ SEC("tracepoint/syscalls/sys_enter_futex")
 int on_sys_enter_futex(struct futex_args *ctx) {
   struct task_struct *t = NULL;
   struct lime_event *event;
-  u64 pid_tgid;
-  u8 val = 0;
 
   t = (struct task_struct *)bpf_get_current_task();
 
@@ -1695,10 +1885,9 @@ int on_sys_enter_futex(struct futex_args *ctx) {
     return -ENOMEM;
 
   event->ts = now();
-  pid_tgid = bpf_get_current_pid_tgid();
-  event->pid_tgid = pid_tgid;
+  mark_current_filter_as();
 
-  bpf_map_update_elem(&filter_as, &pid_tgid, &val, BPF_NOEXIST);
+  event->pid_tgid = get_pid_tgid(t);
 
   event->ev_type = ENTER_FUTEX;
   event->evd.enter_futex.op = ctx->op;
@@ -1711,13 +1900,8 @@ int on_sys_enter_futex(struct futex_args *ctx) {
 
 SEC("tracepoint/syscalls/sys_exit_futex")
 int on_sys_exit_futex(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
@@ -1738,7 +1922,7 @@ int on_sys_enter_rt_sigtimedwait(void *ctx) {
 
   event->ev_type = ENTER_RT_SIGTIMEDWAIT;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   submit_event(event);
 
@@ -1766,7 +1950,7 @@ int on_sys_enter_rt_sigsuspend(void *ctx) {
 
   event->ev_type = ENTER_RT_SIGSUSPEND;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   submit_event(event);
 
@@ -1799,7 +1983,7 @@ int on_sys_enter_epoll_wait(struct epoll_pwait_args *ctx) {
 
   event->ev_type = ENTER_EPOLL_PWAIT;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_epoll_pwait.epfd = ctx->epfd;
 
   submit_event(event);
@@ -1826,7 +2010,7 @@ int on_sys_enter_epoll_wait2(struct epoll_pwait_args *ctx) {
 
   event->ev_type = ENTER_EPOLL_PWAIT;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_epoll_pwait.epfd = ctx->epfd;
 
   submit_event(event);
@@ -1863,7 +2047,7 @@ int on_signal_deliver(u64 *ctx) {
 
   event->ev_type = DELIVER_RT_SIGNAL;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   siginfo = (struct kernel_siginfo *)ctx[1];
 
@@ -1876,7 +2060,7 @@ int on_signal_deliver(u64 *ctx) {
 }
 
 SEC("tracepoint/syscalls/sys_enter_rt_sigreturn")
-int on_sys_exit_rt_sigreturn(void *ctx) {
+int on_sys_enter_rt_sigreturn(void *ctx) {
   struct task_struct *t = NULL;
   struct lime_event *event;
 
@@ -1891,7 +2075,7 @@ int on_sys_exit_rt_sigreturn(void *ctx) {
 
   event->ev_type = ENTER_RT_SIGRETURN;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   submit_event(event);
 
@@ -1914,7 +2098,7 @@ int on_sys_enter_pause(void *ctx) {
 
   event->ev_type = ENTER_PAUSE;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   submit_event(event);
 
@@ -1949,7 +2133,7 @@ int on_sys_enter_mq_timedreceive(struct enter_mq_timedreceive_args *ctx) {
 
   event->ev_type = ENTER_MQ_TIMEDRECEIVE;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   event->evd.enter_mq_timedreceive.mqd = ctx->mqdes;
 
@@ -1978,8 +2162,6 @@ static inline int on_enter_recv_common(struct enter_recv_args *ctx,
   struct task_struct *t = NULL;
   struct lime_event *event;
   struct file *f;
-  u8 val = 0;
-  u64 pid_tgid;
   u32 flags;
 
   if (no_wait) {
@@ -1992,6 +2174,9 @@ static inline int on_enter_recv_common(struct enter_recv_args *ctx,
     return 0;
 
   f = get_struct_file(t, ctx->sock_fd);
+  if (!f)
+    return 0;
+
   bpf_core_read(&flags, sizeof(flags), &f->f_flags);
 
   if (flags & O_NONBLOCK)
@@ -2003,11 +2188,9 @@ static inline int on_enter_recv_common(struct enter_recv_args *ctx,
 
   event->ev_type = ev_type;
   event->ts = now();
-  pid_tgid = bpf_get_current_pid_tgid();
+  mark_current_filter_as();
 
-  bpf_map_update_elem(&filter_as, &pid_tgid, &val, BPF_NOEXIST);
-
-  event->pid_tgid = pid_tgid;
+  event->pid_tgid = get_pid_tgid(t);
   event->evd.enter_recv.sock_fd = (int)ctx->sock_fd;
 
   submit_event(event);
@@ -2024,13 +2207,8 @@ int on_sys_enter_recv(struct enter_recv_args *ctx) {
 
 SEC("tracepoint/syscalls/sys_exit_recv")
 int on_sys_exit_recv(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
@@ -2044,23 +2222,11 @@ int on_sys_enter_recvfrom(struct enter_recv_args *ctx) {
 
 SEC("tracepoint/syscalls/sys_exit_recvfrom")
 int on_sys_exit_recvfrom(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
-
-struct enter_recvmsg_args {
-  u64 unused[2];
-  u64 sock_fd;
-  u64 msghdr;
-  u64 flags;
-};
 
 SEC("tracepoint/syscalls/sys_enter_recvmsg")
 int on_sys_enter_recvmsg(struct enter_recv_args *ctx) {
@@ -2071,13 +2237,8 @@ int on_sys_enter_recvmsg(struct enter_recv_args *ctx) {
 
 SEC("tracepoint/syscalls/sys_exit_recvmsg")
 int on_sys_exit_recvmsg(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
@@ -2091,13 +2252,8 @@ int on_sys_enter_recvmmsg(struct enter_recv_args *ctx) {
 
 SEC("tracepoint/syscalls/sys_exit_recvmmsg")
 int on_sys_exit_recvmmsg(void *ctx) {
-  u64 key = bpf_get_current_pid_tgid();
-
-  if (bpf_map_lookup_elem(&filter_as, &key)) {
-    bpf_map_delete_elem(&filter_as, &key);
-
+  if (consume_current_filter_as())
     return handle_exit_arrival_site(ctx);
-  }
 
   return 0;
 }
@@ -2123,7 +2279,7 @@ int on_sys_enter_msgrcv(struct msgrcv_args *ctx) {
 
   event->ev_type = ENTER_MSGRCV;
   event->ts = now();
-  event->pid_tgid = bpf_get_current_pid_tgid();
+  event->pid_tgid = get_pid_tgid(t);
 
   event->evd.enter_msgrcv.msqid = ctx->msqid;
 
@@ -2165,7 +2321,7 @@ static inline int do_on_sys_enter_semop(struct semop_args *ctx, int timed) {
     return 0;
 
   ts = now();
-  pid_tgid = bpf_get_current_pid_tgid();
+  pid_tgid = get_pid_tgid(t);
 
   if (ctx->nsops <= n) {
     n = ctx->nsops;
