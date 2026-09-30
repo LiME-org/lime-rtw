@@ -1,12 +1,15 @@
 use anyhow::Result;
+use crossterm::event::Event;
 use crossterm::event::KeyCode;
 use tui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
-    widgets::{Block, Borders, Paragraph},
+    widgets::{Block, Borders, Clear, Paragraph},
     Frame,
 };
+
+use tui_input::{backend::crossterm::EventHandler, Input};
 
 use crate::task::TaskId;
 
@@ -19,6 +22,13 @@ pub enum FocusPanel {
     DetailView,
 }
 
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq)]
+enum InputMode {
+    #[default]
+    Normal,
+    Editing,
+}
+
 // Main application state containing all UI data and current focus
 pub struct AppState {
     pub folder: String,
@@ -26,6 +36,11 @@ pub struct AppState {
     pub process_list: Option<ProcessList>,
     pub stats_view: StatsView,
     pub focused_panel: FocusPanel,
+    pub show_search_prompt: bool,
+    pub perform_search: bool,
+    input_mode: InputMode,
+    pub input: tui_input::Input,
+    pub searched_text: String,
 }
 
 impl AppState {
@@ -37,6 +52,11 @@ impl AppState {
             process_list: None,
             stats_view: StatsView::new(),
             focused_panel: FocusPanel::ProcessList,
+            show_search_prompt: false,
+            perform_search: false,
+            input_mode: InputMode::Normal,
+            input: Input::default(),
+            searched_text: String::new(),
         }
     }
 
@@ -127,11 +147,40 @@ impl AppState {
     pub fn previous_separator(&mut self) {
         self.stats_view.previous_separator();
     }
+
+    // Search by process name
+    pub fn search_by_process(&mut self) {
+        // Draw the search prompt for the user
+        self.input_mode = InputMode::Editing;
+        self.show_search_prompt = true;
+    }
+
+    pub fn stop_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.show_search_prompt = false;
+        self.searched_text = self.input.value_and_reset();
+        self.perform_search = true;
+    }
+
+    pub fn cancel_search(&mut self) {
+        self.input_mode = InputMode::Normal;
+        self.show_search_prompt = false;
+        self.searched_text = String::new();
+        self.perform_search = false;
+    }
 }
 
 // Main UI drawing function that renders the entire interface
 pub fn draw_ui(f: &mut Frame, app: &mut AppState) {
     let size = f.area();
+
+    // Apply pending search before drawing so the selection updates this frame
+    if app.perform_search {
+        if let Some(process_list) = &mut app.process_list {
+            process_list.search_by_process(&app.searched_text);
+        }
+        app.perform_search = false;
+    }
 
     if app.focused_panel == FocusPanel::DetailView {
         if let Some(task_id) = app.get_selected_process() {
@@ -233,6 +282,31 @@ pub fn draw_ui(f: &mut Frame, app: &mut AppState) {
     }
 
     draw_help_text_normal_mode(f, chunks[1]);
+
+    if app.show_search_prompt {
+        eprintln!("Show search prompt: {}", app.show_search_prompt);
+        // Draw the input prompt for the user to enter the process name
+        let centered_area = f
+            .area()
+            .centered(Constraint::Percentage(60), Constraint::Percentage(20));
+        draw_search_input_prompt(f, &app.input, centered_area);
+    }
+}
+
+// Draws a search input prompt for the user to enter the process name
+fn draw_search_input_prompt(f: &mut Frame, input: &Input, area: Rect) {
+    // Clear underlying widgets first so the popup background isn't see-through
+    f.render_widget(Clear, area);
+
+    let prompt = Paragraph::new(input.value())
+        .style(Style::default().bg(Color::Yellow))
+        .block(Block::default().borders(Borders::ALL).title("Search"));
+    f.render_widget(prompt, area);
+
+    let width = area.width.max(3) - 3;
+    let scroll = input.visual_scroll(width as usize);
+    let x = input.visual_cursor().max(scroll) - scroll + 1;
+    f.set_cursor_position((area.x + x as u16, area.y + 1));
 }
 
 // Renders help text for normal mode navigation
@@ -253,6 +327,8 @@ fn draw_help_text_normal_mode(f: &mut Frame, area: Rect) {
             Span::raw(" - Go deeper  |  "),
             Span::styled("Esc", Style::default().fg(Color::Yellow)),
             Span::raw(" - Go back  |  "),
+            Span::styled("F3", Style::default().fg(Color::Yellow)),
+            Span::raw(" - Search  |  "),
             Span::styled("q", Style::default().fg(Color::Yellow)),
             Span::raw(" - Quit"),
         ]),
@@ -313,79 +389,100 @@ fn draw_help_text_detail_mode(f: &mut Frame, area: Rect) {
 }
 
 // Handles keyboard input and updates application state accordingly
-pub fn handle_input(app: &mut AppState, key: KeyCode) -> bool {
-    match key {
-        KeyCode::Char('q') => return false,
-        KeyCode::Esc => match app.focused_panel {
-            FocusPanel::DetailView => {
-                app.focused_panel = FocusPanel::ModelView;
-                app.stats_view.reset_detail_scroll();
+pub fn handle_input(app: &mut AppState, key: KeyCode, event: Event) -> bool {
+    if app.input_mode == InputMode::Editing {
+        match key {
+            KeyCode::Enter => {
+                // Quit editing mode
+                //input.value_and_reset();
+                app.stop_search();
             }
-            FocusPanel::ModelView => {
-                app.focused_panel = FocusPanel::ProcessList;
-                app.stats_view_handle_escape();
+            KeyCode::Esc => app.cancel_search(),
+            _ => {
+                app.input.handle_event(&event);
             }
-            FocusPanel::ProcessList => {
-                app.process_list_handle_escape();
-            }
-        },
-        KeyCode::Enter => match app.focused_panel {
-            FocusPanel::ProcessList => {
-                app.process_list_handle_enter();
-            }
-            FocusPanel::ModelView => {
-                if app.stats_view.has_separator_selected() {
-                    app.focused_panel = FocusPanel::DetailView;
-                    app.stats_view.reset_detail_scroll();
+        }
+
+        return true;
+    } else {
+        match key {
+            KeyCode::Char('q') => return false,
+            KeyCode::F(3) => {
+                if app.focused_panel == FocusPanel::ProcessList {
+                    app.search_by_process();
                 }
             }
-            FocusPanel::DetailView => {}
-        },
-        KeyCode::Down | KeyCode::Char('j') => match app.focused_panel {
-            FocusPanel::ProcessList => {
-                app.next_process();
-            }
-            FocusPanel::ModelView => {
-                app.stats_view.next_separator();
-            }
-            FocusPanel::DetailView => {
-                app.stats_view.scroll_detail_view_down();
-            }
-        },
-        KeyCode::Up | KeyCode::Char('k') => match app.focused_panel {
-            FocusPanel::ProcessList => {
-                app.previous_process();
-            }
-            FocusPanel::ModelView => {
-                app.stats_view.previous_separator();
-            }
-            FocusPanel::DetailView => {
-                app.stats_view.scroll_detail_view_up();
-            }
-        },
-        KeyCode::Left | KeyCode::Char('h') => match app.focused_panel {
-            FocusPanel::ProcessList => {
-                app.scroll_process_list_left(50);
-            }
-            FocusPanel::ModelView => {
-                app.scroll_stats_view_left(50);
-            }
-            FocusPanel::DetailView => {
-                app.scroll_stats_view_left(50);
-            }
-        },
-        KeyCode::Right | KeyCode::Char('l') => match app.focused_panel {
-            FocusPanel::ProcessList => {
-                app.scroll_process_list_right(50);
-            }
-            FocusPanel::ModelView => {
-                app.scroll_stats_view_right(50);
-            }
-            FocusPanel::DetailView => {
-                app.scroll_stats_view_right(50);
-            }
-        },
-        _ => {}
+            KeyCode::Esc => match app.focused_panel {
+                FocusPanel::DetailView => {
+                    app.focused_panel = FocusPanel::ModelView;
+                    app.stats_view.reset_detail_scroll();
+                }
+                FocusPanel::ModelView => {
+                    app.focused_panel = FocusPanel::ProcessList;
+                    app.stats_view_handle_escape();
+                }
+                FocusPanel::ProcessList => {
+                    app.process_list_handle_escape();
+                }
+            },
+            KeyCode::Enter => match app.focused_panel {
+                FocusPanel::ProcessList => {
+                    app.process_list_handle_enter();
+                }
+                FocusPanel::ModelView => {
+                    if app.stats_view.has_separator_selected() {
+                        app.focused_panel = FocusPanel::DetailView;
+                        app.stats_view.reset_detail_scroll();
+                    }
+                }
+                FocusPanel::DetailView => {}
+            },
+            KeyCode::Down | KeyCode::Char('j') => match app.focused_panel {
+                FocusPanel::ProcessList => {
+                    app.next_process();
+                }
+                FocusPanel::ModelView => {
+                    app.stats_view.next_separator();
+                }
+                FocusPanel::DetailView => {
+                    app.stats_view.scroll_detail_view_down();
+                }
+            },
+            KeyCode::Up | KeyCode::Char('k') => match app.focused_panel {
+                FocusPanel::ProcessList => {
+                    app.previous_process();
+                }
+                FocusPanel::ModelView => {
+                    app.stats_view.previous_separator();
+                }
+                FocusPanel::DetailView => {
+                    app.stats_view.scroll_detail_view_up();
+                }
+            },
+            KeyCode::Left | KeyCode::Char('h') => match app.focused_panel {
+                FocusPanel::ProcessList => {
+                    app.scroll_process_list_left(50);
+                }
+                FocusPanel::ModelView => {
+                    app.scroll_stats_view_left(50);
+                }
+                FocusPanel::DetailView => {
+                    app.scroll_stats_view_left(50);
+                }
+            },
+            KeyCode::Right | KeyCode::Char('l') => match app.focused_panel {
+                FocusPanel::ProcessList => {
+                    app.scroll_process_list_right(50);
+                }
+                FocusPanel::ModelView => {
+                    app.scroll_stats_view_right(50);
+                }
+                FocusPanel::DetailView => {
+                    app.scroll_stats_view_right(50);
+                }
+            },
+            _ => {}
+        }
     }
 
     true

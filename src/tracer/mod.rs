@@ -203,7 +203,7 @@ impl TracedCmd {
         sset.add(sys::signal::Signal::SIGUSR1);
 
         if verbose {
-            eprintln!("LiME: launching {:#?}", &self.cmd_line);
+            eprintln!("LiME: launching {:#?}", self.cmd_line);
         }
 
         sys::signal::kill(self.pid, SIGUSR1)?;

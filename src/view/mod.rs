@@ -96,9 +96,9 @@ impl ViewProcessor {
 
         loop {
             terminal.draw(|f| draw_ui(f, &mut app))?;
-
-            if let Event::Key(key) = event::read()? {
-                if !handle_input(&mut app, key.code) {
+            let event = event::read()?;
+            if let Event::Key(key) = event {
+                if !handle_input(&mut app, key.code, event) {
                     break;
                 }
             }
