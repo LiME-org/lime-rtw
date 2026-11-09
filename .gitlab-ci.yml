@@ -56,7 +56,7 @@ bench:extract:
   script:
     - rustc --version && cargo --version
     - rustup component add rustfmt clippy
-    - cargo install --locked hyperfine
+    - cargo install --locked hyperfine --version '^2'
     - cargo build --release
     - |
       set -euo pipefail
@@ -103,7 +103,6 @@ bench:extract:
 
       python3 - "$hyperfine_json" "$trace_dir" "$BENCH_SECURE_FILE" "$BENCH_RUNS" "$BENCH_WARMUP" > "$summary_md" <<'PY'
       import json
-      import statistics
       import sys
 
       json_path = sys.argv[1]
@@ -115,7 +114,7 @@ bench:extract:
       with open(json_path, "r", encoding="utf-8") as fh:
           data = json.load(fh)
       result = data["results"][0]
-      times = result["times"]
+      wall = result["summary"]["time_wall_clock"]
 
       print("# Extract Benchmark")
       print()
@@ -127,11 +126,11 @@ bench:extract:
       print()
       print("| Metric | Seconds |")
       print("| --- | ---: |")
-      print(f"| Mean | {result['mean']:.6f} |")
-      print(f"| Median | {statistics.median(times):.6f} |")
-      print(f"| Stddev | {result['stddev']:.6f} |")
-      print(f"| Min | {min(times):.6f} |")
-      print(f"| Max | {max(times):.6f} |")
+      print(f"| Mean | {wall['mean']:.6f} |")
+      print(f"| Median | {wall['median']:.6f} |")
+      print(f"| Stddev | {wall['stddev']:.6f} |")
+      print(f"| Min | {wall['min']:.6f} |")
+      print(f"| Max | {wall['max']:.6f} |")
       PY
       cat "$summary_md"
   artifacts:
