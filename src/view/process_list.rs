@@ -234,22 +234,17 @@ impl ProcessList {
         f.render_stateful_widget(table, area, &mut self.state);
     }
 
-    // Search for a process by name in the process list
+    // Select the first process whose name contains the given text
     pub fn search_by_process(&mut self, process_name: &str) {
-        for (idx, process) in self.data.get_processes().values().enumerate() {
-            if let Some(comm) = &process.info.comm {
-                eprintln!("Checking process: {}", comm);
-                if comm.contains(process_name) {
-                    eprintln!("Found matching process: {}", comm);
-                    self.state.select(Some(idx));
-                    eprintln!("|-> Selecting process at index: {}", idx);
-                    break;
-                }
-            }
-        }
-        // If no matching process was found, deselect any selected process
-        if self.state.selected().is_none() {
-            self.state.select(None);
+        let found = self.data.get_processes().values().position(|process| {
+            process
+                .info
+                .comm
+                .as_deref()
+                .is_some_and(|comm| comm.contains(process_name))
+        });
+        if let Some(idx) = found {
+            self.state.select(Some(idx));
         }
     }
 }
