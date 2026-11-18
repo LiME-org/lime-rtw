@@ -2028,7 +2028,7 @@ int on_signal_deliver(u64 *ctx) {
   struct task_struct *t = NULL;
   struct lime_event *event;
   int sig = 0;
-  struct kernel_siginfo *siginfo = NULL;
+  int si_code;
 
   sig = (int)ctx[0];
 
@@ -2041,6 +2041,11 @@ int on_signal_deliver(u64 *ctx) {
   if (filter_out_task(t))
     return 0;
 
+  /* Linux 7.2 treats siginfo as a scalar, so use a probe read. */
+  struct kernel_siginfo *siginfo = (struct kernel_siginfo *)ctx[1];
+  if (bpf_core_read(&si_code, sizeof(si_code), &siginfo->si_code))
+    return 0;
+
   event = bpf_ringbuf_reserve(&events, sizeof(*event), 0);
   if (!event)
     return -ENOMEM;
@@ -2049,10 +2054,8 @@ int on_signal_deliver(u64 *ctx) {
   event->ts = now();
   event->pid_tgid = get_pid_tgid(t);
 
-  siginfo = (struct kernel_siginfo *)ctx[1];
-
   event->evd.deliver_rt_sig.signo = sig;
-  event->evd.deliver_rt_sig.si_code = siginfo->si_code;
+  event->evd.deliver_rt_sig.si_code = si_code;
 
   submit_event(event);
 
