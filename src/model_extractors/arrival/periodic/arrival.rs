@@ -1,73 +1,53 @@
 use crate::{
     job::Job,
     model_extractors::arrival::{ArrivalModel, ArrivalModelExtractor, Periodic},
-    utils::UpperBoundTracker,
 };
 
-// A periodic arrival detector.
-/// Suitable only if the arrivals can be determinded precisely and with certainty.
-/// More precisely, this relies on the assumption that
-/// `true_arrival == job.arrival - job.measured_jitter`.
-/// This detector detects elided activations.
+/// Uses the first gap between absolute timer arrivals as the period.
+/// A later gap of a different length rules out an exact period for this trace.
+#[derive(Default)]
 pub struct DiffPeriodicExtractor {
-    offset: Option<u64>,
-    last_arrival: Option<u64>,
-    max_jitter: UpperBoundTracker<u64>,
     period: Option<u64>,
-    should_update: bool,
+    first_arrival: u64,
+    last_arrival: Option<u64>,
+    max_jitter: u64,
+    rejected: bool,
 }
 
 impl DiffPeriodicExtractor {
     pub fn new() -> Self {
-        Self {
-            last_arrival: None,
-            max_jitter: UpperBoundTracker::default(),
-            period: None,
-            offset: None,
-            should_update: true,
-        }
+        Self::default()
     }
 
     pub fn update(&mut self, job: &Job) {
-        if !self.should_update {
+        if self.rejected {
             return;
         }
-
-        // true arrival
         let arrival = job.arrival();
-        let jitter = job.release_jitter();
-
-        if let Some(last_arrival) = self.last_arrival {
-            let delta = arrival - last_arrival;
-
-            if let Some(period) = self.period {
-                if delta == period {
-                    self.max_jitter.update(jitter);
-                } else {
-                    self.should_update = false;
-                    self.period = None;
-                }
-            } else {
-                self.period.replace(delta);
-                self.max_jitter.update(jitter);
+        if let Some(last) = self.last_arrival {
+            let gap = arrival
+                .checked_sub(last)
+                .expect("jobs are processed in arrival order");
+            if self.period.is_some_and(|period| period != gap) {
+                self.rejected = true;
+                self.period = None;
+                return;
             }
+            self.period = Some(gap);
         } else {
-            self.max_jitter.update(jitter);
-            self.offset.replace(arrival);
+            self.first_arrival = arrival;
         }
-
         self.last_arrival = Some(arrival);
+        self.max_jitter = self.max_jitter.max(job.release_jitter());
     }
 }
 
 impl ArrivalModelExtractor for DiffPeriodicExtractor {
     fn extract(&self) -> Option<ArrivalModel<'_>> {
-        self.period.map(|period| {
-            ArrivalModel::Periodic(Periodic::Arrival {
-                period,
-                max_jitter: self.max_jitter.get().unwrap(),
-                offset: self.offset.unwrap(),
-            })
-        })
+        Some(ArrivalModel::Periodic(Periodic::Arrival {
+            period: self.period?,
+            max_jitter: self.max_jitter,
+            offset: self.first_arrival,
+        }))
     }
 }
