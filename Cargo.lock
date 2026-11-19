@@ -903,8 +903,8 @@ checksum = "b6d2cec3eae94f9f509c767b45932f1ada8350c4bdb85af2fcab4a3c14807981"
 
 [[package]]
 name = "lime-model-extractors"
-version = "0.1.0"
-source = "git+https://github.com/LiME-org/lime-model-extractors#84b52720ebfbedb28768c242dd9d5fbbf145f999"
+version = "0.2.0"
+source = "git+https://github.com/LiME-org/lime-model-extractors?tag=0.2.0#4a9860ba9085358d9671eae5b062da4fe6f343f2"
 dependencies = [
  "thiserror 2.0.18",
 ]
