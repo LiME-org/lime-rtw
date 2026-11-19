@@ -1,21 +1,24 @@
 use std::borrow::Cow;
 
-use lime_model_extractors::extractors::{DeltaMaxExtractor, DeltaMinExtractor};
+use lime_model_extractors::extractors::{DeltaMaxExtractor, DeltaMinExtractor, SporadicExtractor};
 
 use crate::job::Job;
 
 use super::{ArrivalModel, ArrivalModelExtractor};
 
 pub struct Sporadic {
+    sporadic: SporadicExtractor,
     dmin_extractor: DeltaMinExtractor,
     dmax_extractor: DeltaMaxExtractor,
 }
 
 impl Sporadic {
     pub fn new(capacity: usize) -> Self {
-        let nmax = (capacity > 0).then_some(capacity);
+        // The first reported curve entry spans two consecutive arrivals.
+        let nmax = (capacity > 0).then_some(capacity.max(2));
 
         Self {
+            sporadic: SporadicExtractor::new(),
             dmin_extractor: DeltaMinExtractor::new(nmax)
                 .expect("arrival curve dmin config is valid"),
             dmax_extractor: DeltaMaxExtractor::new(nmax)
@@ -50,6 +53,9 @@ impl Sporadic {
 
     pub fn update(&mut self, job: &Job) {
         let arrival = job.arrival();
+        self.sporadic
+            .feed([arrival])
+            .expect("jobs are processed in arrival order");
         self.dmin_extractor
             .feed([arrival])
             .expect("jobs are processed in arrival order");
@@ -59,11 +65,7 @@ impl Sporadic {
     }
 
     pub fn mit(&self) -> Option<u64> {
-        self.dmin_extractor
-            .current_model()
-            .get(2)
-            .copied()
-            .map(|mit| mit - 1)
+        self.sporadic.current_model()
     }
 
     pub fn extract_sporadic(&self) -> Option<ArrivalModel<'_>> {
@@ -90,7 +92,7 @@ impl Sporadic {
     // Keep the legacy Lime indexing semantics by dropping the first two
     // entries from the delta-min model and shifting the remaining values down.
     fn trim_and_shift_sub(mut values: Vec<u64>) -> Vec<u64> {
-        values.drain(..2);
+        values.drain(..values.len().min(2));
         for value in &mut values {
             *value = value.saturating_sub(1);
         }

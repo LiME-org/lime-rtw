@@ -193,6 +193,7 @@ pub enum LimeSubCommand {
         #[clap(long, default_value = "32")]
         wcet_n_max_len: usize,
 
+        /// Maximum arrival-curve window in jobs. Use 0 for no limit.
         #[clap(long, default_value = "32")]
         arrival_curve_max_len: usize,
 
