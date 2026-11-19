@@ -189,7 +189,7 @@ pub enum LimeSubCommand {
         #[clap(long, value_parser = parse_boot_time)]
         before: Option<u64>,
 
-        /// Max window length for WCET(n)
+        /// Maximum WCET(n) window length in jobs.
         #[clap(long, default_value = "32")]
         wcet_n_max_len: usize,
 

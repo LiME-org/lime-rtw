@@ -1,91 +1,39 @@
-use std::ops::{Add, AddAssign};
+use lime_model_extractors::extractors::MaxResourceUseExtractor;
 
-use crate::{ir::timeline::Timeline, job::Job, utils::RingBuffer};
+use crate::{ir::timeline::Timeline, job::Job};
 
 /// WCET(n) extractor.
 pub struct ExecutionTime {
-    tracker: MaxSumN<u64>,
+    tracker: Option<MaxResourceUseExtractor>,
 }
 
-// TODO user should be able to modify this
-const WCET_N_MAX: usize = 32;
-
 impl ExecutionTime {
+    /// Tracks execution time over windows of up to `n_max` consecutive jobs.
     pub fn new(n_max: usize) -> Self {
         Self {
-            tracker: MaxSumN::new(n_max),
+            tracker: MaxResourceUseExtractor::new(Some(n_max)).ok(),
         }
     }
 
     pub fn update(&mut self, timeline: &mut Timeline, job: &Job) {
-        let t = job.processor_time(timeline);
-
-        self.tracker.update(t);
+        if let Some(tracker) = &mut self.tracker {
+            tracker.feed([job.processor_time(timeline)]);
+        }
     }
 
     pub fn wcet(&self, n: usize) -> Option<u64> {
-        self.tracker.max_sum_n(n).copied()
+        // wcets() starts at WCET(1), so WCET(n) is at index n - 1 and n = 0 has no entry.
+        self.wcets().nth(n.checked_sub(1)?)
     }
 
+    /// Yields the observed execution-time bounds in order, starting with WCET(1).
     pub fn wcets(&self) -> impl Iterator<Item = u64> + '_ {
-        self.tracker.max_sums()
-    }
-}
-
-struct MaxSumN<T> {
-    buff: RingBuffer<T>,
-    max_sums: Vec<T>,
-}
-
-impl<T> Default for MaxSumN<T>
-where
-    T: Ord + Add<Output = T> + AddAssign + Copy + Default,
-{
-    fn default() -> Self {
-        Self::new(WCET_N_MAX)
-    }
-}
-
-impl<T> MaxSumN<T>
-where
-    T: Ord + Add<Output = T> + AddAssign + Copy + Default,
-{
-    pub fn new(n: usize) -> Self {
-        Self {
-            buff: RingBuffer::new(n),
-            max_sums: Vec::with_capacity(n),
-        }
-    }
-
-    pub fn update(&mut self, new_element: T) {
-        let old = self.buff.push(new_element);
-
-        if old.is_none() {
-            self.max_sums.push(new_element);
-
-            let last = self.max_sums.len();
-
-            if last > 1 {
-                let v = self.max_sums[last - 2];
-                self.max_sums[last - 1] += v;
-            }
-        }
-
-        let mut sum = T::default();
-
-        for (i, v) in self.buff.as_slice().iter().rev().enumerate() {
-            sum += *v;
-
-            self.max_sums[i] = self.max_sums[i].max(sum);
-        }
-    }
-
-    pub fn max_sum_n(&self, n: usize) -> Option<&T> {
-        self.max_sums.get(n - 1)
-    }
-
-    pub fn max_sums(&self) -> impl Iterator<Item = T> + '_ {
-        self.max_sums.iter().copied()
+        self.tracker
+            .as_ref()
+            .map(MaxResourceUseExtractor::current_model)
+            .unwrap_or_default()
+            .into_iter()
+            .skip(1)
     }
 }
 
@@ -97,7 +45,7 @@ pub mod tests {
         utils::ThreadId,
     };
 
-    use super::MaxSumN;
+    use super::ExecutionTime;
 
     const ID: ThreadId = ThreadId { pid: 0, tgid: 0 };
 
@@ -232,7 +180,7 @@ pub mod tests {
 
     #[test]
     fn test_wcet() {
-        use crate::{job_separator::JobSeparator, model_extractors::execution::ExecutionTime};
+        use crate::job_separator::JobSeparator;
         let mut ir = Ir::new();
         let mut jobs = Vec::new();
 
@@ -253,33 +201,26 @@ pub mod tests {
 
     #[test]
     fn test_max_sum_n() {
-        let example = &[1, 2, 3, 4, 5, 6];
+        let mut tracker = ExecutionTime::new(4);
+        tracker.tracker.as_mut().unwrap().feed([1, 2, 3]);
 
-        let mut tracker = MaxSumN::<i32>::new(4);
+        assert_eq!(tracker.wcet(1), Some(3));
+        assert_eq!(tracker.wcet(2), Some(5));
+        assert_eq!(tracker.wcet(3), Some(6));
+        assert_eq!(tracker.wcet(4), None);
 
-        for i in example[..3].iter() {
-            tracker.update(*i);
-        }
+        tracker.tracker.as_mut().unwrap().feed([4, 5, 6]);
 
-        assert_eq!(tracker.max_sum_n(1), Some(&3));
-        assert_eq!(tracker.max_sum_n(2), Some(&5));
-        assert_eq!(tracker.max_sum_n(3), Some(&6));
-        assert_eq!(tracker.max_sum_n(4), None);
+        assert_eq!(tracker.wcet(1), Some(6));
+        assert_eq!(tracker.wcet(2), Some(11));
+        assert_eq!(tracker.wcet(3), Some(15));
+        assert_eq!(tracker.wcet(4), Some(18));
 
-        for i in example[3..].iter() {
-            tracker.update(*i);
-        }
+        tracker.tracker.as_mut().unwrap().feed([1]);
 
-        assert_eq!(tracker.max_sum_n(1), Some(&6));
-        assert_eq!(tracker.max_sum_n(2), Some(&11));
-        assert_eq!(tracker.max_sum_n(3), Some(&15));
-        assert_eq!(tracker.max_sum_n(4), Some(&18));
-
-        tracker.update(1);
-
-        assert_eq!(tracker.max_sum_n(1), Some(&6));
-        assert_eq!(tracker.max_sum_n(2), Some(&11));
-        assert_eq!(tracker.max_sum_n(3), Some(&15));
-        assert_eq!(tracker.max_sum_n(4), Some(&18));
+        assert_eq!(tracker.wcet(1), Some(6));
+        assert_eq!(tracker.wcet(2), Some(11));
+        assert_eq!(tracker.wcet(3), Some(15));
+        assert_eq!(tracker.wcet(4), Some(18));
     }
 }

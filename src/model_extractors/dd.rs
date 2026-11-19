@@ -18,7 +18,7 @@ pub struct JobSeparatorModels<'a> {
     /// Number of jobs observed for this separator
     count: usize,
 
-    /// WCET(n) for this separator. `wcet[n-1]` gives WCET(n).
+    /// `wcet_n[i]` is the maximum observed total execution time over `i + 1` consecutive jobs.
     wcet_n: Vec<u64>,
 
     /// Dynamic self suspension bound
