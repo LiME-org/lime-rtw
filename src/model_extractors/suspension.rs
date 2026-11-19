@@ -4,31 +4,28 @@ use lime_model_extractors::{
     extractors::SegmentedSuspensionModelExtractor, ObservedSegment, SuspensionError,
 };
 
-use crate::{ir::timeline::Timeline, job::Job, utils::UpperBoundTracker};
+use crate::{ir::timeline::Timeline, job::Job};
 
 pub(crate) const DEFAULT_MAX_MODELS: NonZeroUsize = NonZeroUsize::new(16).unwrap();
 pub(crate) const DEFAULT_MAX_SEGMENTS: NonZeroUsize = NonZeroUsize::new(1024).unwrap();
 
 #[derive(Default)]
 pub struct DynamicSelfSuspension {
-    tracker: UpperBoundTracker<u64>,
+    max_suspension: u64,
 }
 
 impl DynamicSelfSuspension {
     pub fn new() -> Self {
-        Self {
-            tracker: UpperBoundTracker::default(),
-        }
+        Self::default()
     }
 
     pub fn update(&mut self, timeline: &mut Timeline, job: &Job) -> u64 {
-        let t = job.suspension_time(timeline);
-
-        self.tracker.update(t)
+        self.max_suspension = self.max_suspension.max(job.suspension_time(timeline));
+        self.max_suspension
     }
 
     pub fn get(&self) -> u64 {
-        self.tracker.get().unwrap_or(0)
+        self.max_suspension
     }
 
     pub fn report(&self) {

@@ -69,23 +69,6 @@ where
     }
 }
 
-#[derive(Default)]
-pub struct UpperBoundTracker<T> {
-    max_val: Option<T>,
-}
-
-impl<T: Ord + Copy> UpperBoundTracker<T> {
-    pub fn update(&mut self, new: T) -> T {
-        let v = self.max_val.map_or(new, |prev| prev.max(new));
-        self.max_val = Some(v);
-        v
-    }
-
-    pub fn get(&self) -> Option<T> {
-        self.max_val
-    }
-}
-
 pub struct KthMaxTracker<T> {
     k: usize,
     heap: MinMaxHeap<T>,
