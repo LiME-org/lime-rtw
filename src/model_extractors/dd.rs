@@ -24,11 +24,8 @@ pub struct JobSeparatorModels<'a> {
     /// Dynamic self suspension bound
     dynamic_self_suspension: u64,
 
-    /// Dictionary of segmented self-suspension bounds.
-    /// The key is the number `m` of self-suspension segments.
-    /// The value is a vector representing the sequence of segment bounds `C_1, S_1, ..., S_m, C_m+1`.
-    /// The value of at index 2 * i is the i-th computation segment bound.
-    /// The value at index (2 * i + 1) is the i-th suspension bound.
+    /// For jobs with the same segment count, each pair bounds the delay before
+    /// that segment and its execution time. The first delay includes release jitter.
     #[serde(skip_serializing_if = "Option::is_none")]
     segmented_self_suspensions: Option<BTreeMap<usize, Vec<(u64, u64)>>>,
 

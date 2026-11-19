@@ -1,12 +1,8 @@
 use std::collections::BTreeMap;
 
-use crate::job::Job;
-use crate::utils::InterleaveBy;
-use crate::{
-    interval::{Bound, Interval},
-    ir::timeline::Timeline,
-    utils::UpperBoundTracker,
-};
+use lime_model_extractors::{extractors::SegmentedSuspensionModelExtractor, ObservedSegment};
+
+use crate::{ir::timeline::Timeline, job::Job, utils::UpperBoundTracker};
 
 #[derive(Default)]
 pub struct DynamicSelfSuspension {
@@ -35,36 +31,9 @@ impl DynamicSelfSuspension {
     }
 }
 
-#[derive(PartialEq, Eq)]
-enum Segment {
-    Execution(Interval<u64>),
-    SelfSuspension(Interval<u64>),
-}
-
-impl Segment {
-    fn start(&self) -> Bound<u64> {
-        match self {
-            Segment::Execution(a) | Segment::SelfSuspension(a) => a.lower_bound(),
-        }
-    }
-}
-
-impl PartialOrd for Segment {
-    fn partial_cmp(&self, other: &Self) -> Option<std::cmp::Ordering> {
-        Some(self.cmp(other))
-    }
-}
-
-impl Ord for Segment {
-    fn cmp(&self, other: &Self) -> std::cmp::Ordering {
-        self.start().cmp(&other.start())
-    }
-}
-
 pub struct BagOfSegmentedSelfSuspension {
-    segments: BTreeMap<usize, Vec<(u64, u64)>>,
+    models: Option<BTreeMap<usize, SegmentedSuspensionModelExtractor>>,
     capacity: usize,
-    should_extract: bool,
 }
 
 impl BagOfSegmentedSelfSuspension {
@@ -74,114 +43,83 @@ impl BagOfSegmentedSelfSuspension {
 
     pub fn with_capacity(capacity: usize) -> Self {
         Self {
+            models: Some(BTreeMap::new()),
             capacity,
-            segments: BTreeMap::new(),
-            should_extract: true,
         }
     }
 
-    fn get_segments(timeline: &mut Timeline, job: &Job) -> Vec<(u64, u64)> {
+    fn get_segments(timeline: &mut Timeline, job: &Job) -> Vec<ObservedSegment> {
         let range = job.boundaries();
-        let execs = timeline
-            .runtime
-            .plain_intervals(&range)
-            .map(Segment::Execution);
-
-        let mut skip = 0;
-
-        if job.release_jitter() > 0 {
-            skip = 1;
-        }
-
+        let mut execs = timeline.runtime.plain_intervals(&range).peekable();
+        let jitter = job.release_jitter();
+        // Positive release jitter already accounts for the first suspension interval.
         let suspensions = timeline
             .suspension
             .plain_intervals(&range)
-            .skip(skip)
-            .map(Segment::SelfSuspension);
+            .skip(usize::from(jitter > 0));
+        let mut segments = Vec::new();
+        let mut delay = jitter;
 
-        let segments = InterleaveBy::new(execs, suspensions, |a, b| a.cmp(b));
-
-        let mut prev_exec = 0;
-        let mut prev_susp = job.release_jitter();
-        let mut new_segments = Vec::with_capacity(64);
-
-        for segment in segments {
-            match segment {
-                Segment::Execution(i) => prev_exec += i.duration_unwrap(),
-                Segment::SelfSuspension(i) => {
-                    let segment_pairs = (prev_susp, prev_exec);
-                    new_segments.push(segment_pairs);
-                    prev_exec = 0;
-                    prev_susp = i.duration_unwrap();
-                }
+        for suspension in suspensions {
+            let mut execution = 0;
+            while let Some(interval) =
+                execs.next_if(|i| i.lower_bound() <= suspension.lower_bound())
+            {
+                execution += interval.duration_unwrap();
             }
+            segments.push((delay, execution));
+            delay = suspension.duration_unwrap();
         }
 
-        if prev_exec > 0 {
-            let segment_pairs = (prev_susp, prev_exec);
-            new_segments.push(segment_pairs);
+        let execution = execs.map(|i| i.duration_unwrap()).sum();
+        if execution > 0 {
+            segments.push((delay, execution));
         }
-
-        new_segments.shrink_to_fit();
-
-        new_segments
-    }
-
-    fn update_segments(old: &mut [(u64, u64)], new: &[(u64, u64)]) {
-        let n = old.len().min(new.len());
-
-        for i in 0..n {
-            old[i].0 = old[i].0.max(new[i].0);
-            old[i].1 = old[i].1.max(new[i].1);
-        }
+        segments
     }
 
     pub fn update(&mut self, timeline: &mut Timeline, job: &Job) {
-        if self.should_extract {
-            if timeline.has_compressed_intervals(&job.boundaries()) {
-                self.should_extract = false;
+        let Some(models) = &mut self.models else {
+            return;
+        };
+        if timeline.has_compressed_intervals(&job.boundaries()) {
+            // Compressed intervals no longer identify individual segment boundaries.
+            self.models = None;
+            return;
+        }
 
-                return;
-            }
+        let segments = Self::get_segments(timeline, job);
+        let count = segments.len();
+        if models.len() == self.capacity && !models.contains_key(&count) {
+            self.models = None;
+            return;
+        }
 
-            let segments = Self::get_segments(timeline, job);
-            let m = segments.len();
-
-            if m > 1024 {
-                self.should_extract = false;
-
-                return;
-            }
-
-            let is_full = self.segments.len() == self.capacity;
-
-            match self.segments.entry(m) {
-                std::collections::btree_map::Entry::Vacant(v) => {
-                    if is_full {
-                        self.should_extract = false;
-                        self.segments.clear();
-
-                        return;
-                    }
-
-                    v.insert(segments);
-                }
-
-                std::collections::btree_map::Entry::Occupied(mut o) => {
-                    let old = o.get_mut();
-
-                    Self::update_segments(old, &segments);
-                }
-            }
+        let extractor = models.entry(count).or_insert_with(|| {
+            SegmentedSuspensionModelExtractor::new(Some(1024)).expect("positive segment limit")
+        });
+        if segments.is_empty() {
+            // Keep the entry so the report includes `"0": []`. feed() rejects empty jobs.
+            return;
+        }
+        if extractor.feed([segments]).is_err() {
+            self.models = None;
         }
     }
 
-    pub fn extract(&self) -> Option<BTreeMap<usize, Vec<(u64, u64)>>> {
-        if self.should_extract && !self.segments.is_empty() {
-            return Some(self.segments.clone());
-        }
-
-        None
+    pub fn extract(&self) -> Option<BTreeMap<usize, Vec<ObservedSegment>>> {
+        let models = self.models.as_ref().filter(|m| !m.is_empty())?;
+        models
+            .iter()
+            .map(|(&count, extractor)| {
+                let segments = extractor
+                    .current_model()?
+                    .into_iter()
+                    .map(|s| (s.max_suspension_time, s.max_execution_time))
+                    .collect();
+                Some((count, segments))
+            })
+            .collect()
     }
 }
 
