@@ -923,7 +923,6 @@ dependencies = [
  "libbpf-rs",
  "libc",
  "lime-model-extractors",
- "min-max-heap",
  "nc",
  "nix 0.31.2",
  "plain",
@@ -1030,12 +1029,6 @@ checksum = "488016bfae457b036d996092f6cb448677611ce4449e970ceaf42695203f218a"
 dependencies = [
  "autocfg",
 ]
-
-[[package]]
-name = "min-max-heap"
-version = "1.3.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "2687e6cf9c00f48e9284cf9fd15f2ef341d03cc7743abf9df4c5f07fdee50b18"
 
 [[package]]
 name = "minimal-lexical"
