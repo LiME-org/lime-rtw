@@ -40,7 +40,10 @@ impl JobSeparatorExtractors {
         Self {
             wcet: ExecutionTime::new(ctx.wcet_n_max_len),
             suspension: DynamicSelfSuspension::new(),
-            bsss: BagOfSegmentedSelfSuspension::new(),
+            bsss: BagOfSegmentedSelfSuspension::with_limits(
+                ctx.suspension_max_models.get(),
+                ctx.suspension_max_segments,
+            ),
             // segmented_self_suspension: SegementedSelfSuspension::new(),
             count: JobCounter::new(),
             sporadic: Sporadic::new(ctx.arrival_curve_max_len),

@@ -13,7 +13,7 @@
 //! Please note that  LiME actual default parameters are defined in the `cli`
 //! module.
 
-use std::time::Duration;
+use std::{num::NonZeroUsize, time::Duration};
 
 #[cfg(target_os = "linux")]
 use crate::cli::TraceTarget;
@@ -76,6 +76,10 @@ pub struct LimeContext {
     pub wcet_n_max_len: usize,
     /// Maximum number of consecutive jobs tracked by arrival curve extractors.
     pub arrival_curve_max_len: usize,
+    /// Maximum number of segments per job.
+    pub suspension_max_segments: NonZeroUsize,
+    /// Maximum number of distinct segment counts per job separator.
+    pub suspension_max_models: NonZeroUsize,
     /// Release period extractor batch size
     pub period_extractor_batch_size: usize,
 
@@ -151,7 +155,10 @@ impl From<&CLI> for LimeContext {
             None
         };
 
+        let (suspension_max_segments, suspension_max_models) = cli_opts.suspension_limits();
         Self {
+            suspension_max_segments,
+            suspension_max_models,
             wcet_n_max_len: cli_opts.wcet_n_max_len().unwrap_or_default(),
             arrival_curve_max_len: cli_opts.arrival_curve_max_len().unwrap_or_default(),
             enable_rbf: cli_opts.enable_rbf(),

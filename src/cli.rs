@@ -14,9 +14,12 @@
 //! `LimeContext` first. Please see the context module.
 //!
 
-use std::time::Duration;
+use std::{num::NonZeroUsize, time::Duration};
 
-use crate::trace::writer::EventsFileFormat;
+use crate::{
+    model_extractors::suspension::{DEFAULT_MAX_MODELS, DEFAULT_MAX_SEGMENTS},
+    trace::writer::EventsFileFormat,
+};
 
 use clap::{Parser, Subcommand};
 use duration_str::{DError, DResult};
@@ -196,6 +199,14 @@ pub enum LimeSubCommand {
         /// Maximum arrival-curve window in jobs. Use 0 for no limit.
         #[clap(long, default_value = "32")]
         arrival_curve_max_len: usize,
+
+        /// Maximum segments per job. Exceeding this limit discards the job separator's segmented suspension model.
+        #[clap(long, default_value_t = DEFAULT_MAX_SEGMENTS)]
+        suspension_max_segments: NonZeroUsize,
+
+        /// Maximum distinct segment counts per job separator. Exceeding this limit discards its segmented suspension model.
+        #[clap(long, default_value_t = DEFAULT_MAX_MODELS)]
+        suspension_max_models: NonZeroUsize,
 
         /// Enable the Request Bound Function (RBF) extraction.
         /// By default, this flag is set to `false` to reduce
@@ -431,6 +442,18 @@ impl CLI {
                 ..
             } => Some(*arrival_curve_max_len),
             _ => None,
+        }
+    }
+
+    /// Returns (segments per job, distinct segment counts per job separator).
+    pub(crate) fn suspension_limits(&self) -> (NonZeroUsize, NonZeroUsize) {
+        match &self.command {
+            LimeSubCommand::Extract {
+                suspension_max_segments,
+                suspension_max_models,
+                ..
+            } => (*suspension_max_segments, *suspension_max_models),
+            _ => (DEFAULT_MAX_SEGMENTS, DEFAULT_MAX_MODELS),
         }
     }
 

@@ -1,8 +1,13 @@
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, num::NonZeroUsize};
 
-use lime_model_extractors::{extractors::SegmentedSuspensionModelExtractor, ObservedSegment};
+use lime_model_extractors::{
+    extractors::SegmentedSuspensionModelExtractor, ObservedSegment, SuspensionError,
+};
 
 use crate::{ir::timeline::Timeline, job::Job, utils::UpperBoundTracker};
+
+pub(crate) const DEFAULT_MAX_MODELS: NonZeroUsize = NonZeroUsize::new(16).unwrap();
+pub(crate) const DEFAULT_MAX_SEGMENTS: NonZeroUsize = NonZeroUsize::new(1024).unwrap();
 
 #[derive(Default)]
 pub struct DynamicSelfSuspension {
@@ -34,17 +39,25 @@ impl DynamicSelfSuspension {
 pub struct BagOfSegmentedSelfSuspension {
     models: Option<BTreeMap<usize, SegmentedSuspensionModelExtractor>>,
     capacity: usize,
+    max_segments: NonZeroUsize,
 }
 
 impl BagOfSegmentedSelfSuspension {
     pub fn new() -> Self {
-        Self::with_capacity(16)
+        Self::with_capacity(DEFAULT_MAX_MODELS.get())
     }
 
     pub fn with_capacity(capacity: usize) -> Self {
+        Self::with_limits(capacity, DEFAULT_MAX_SEGMENTS)
+    }
+
+    /// Tracks up to `capacity` distinct segment counts and `max_segments` segments per job.
+    /// Exceeding either limit discards all bounds for this bag and stops further updates.
+    pub fn with_limits(capacity: usize, max_segments: NonZeroUsize) -> Self {
         Self {
             models: Some(BTreeMap::new()),
             capacity,
+            max_segments,
         }
     }
 
@@ -91,18 +104,30 @@ impl BagOfSegmentedSelfSuspension {
         let segments = Self::get_segments(timeline, job);
         let count = segments.len();
         if models.len() == self.capacity && !models.contains_key(&count) {
+            let observed = models.len() + 1;
+            eprintln!(
+                "Warning: omitting the segmented suspension model at job release {}. Observed {observed} distinct segment counts (limit {}). Rerun extract with --suspension-max-models {observed} or higher.",
+                job.release, self.capacity
+            );
             self.models = None;
             return;
         }
 
         let extractor = models.entry(count).or_insert_with(|| {
-            SegmentedSuspensionModelExtractor::new(Some(1024)).expect("positive segment limit")
+            SegmentedSuspensionModelExtractor::new(Some(self.max_segments.get()))
+                .expect("max_segments is positive")
         });
         if segments.is_empty() {
             // Keep the entry so the report includes `"0": []`. feed() rejects empty jobs.
             return;
         }
-        if extractor.feed([segments]).is_err() {
+        if let Err(error) = extractor.feed([segments]) {
+            if let SuspensionError::SegmentLimitExceeded { observed, limit } = error {
+                eprintln!(
+                    "Warning: omitting the segmented suspension model at job release {}. Observed {observed} segments (limit {limit}). Rerun extract with --suspension-max-segments {observed} or higher.",
+                    job.release
+                );
+            }
             self.models = None;
         }
     }
