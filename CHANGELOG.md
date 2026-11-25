@@ -4,6 +4,27 @@ All notable changes to this project will be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
+## [0.5.0] - 2026-11-26
+
+### Added
+
+- In the TUI process list, press F3 to search by name. Enter selects the first process whose name contains the search text.
+
+### Changed
+
+- Migrated LiME to the Rust 2024 edition.
+- Migrated sporadic minimum inter-arrival time, WCET(n), and segmented self-suspension extraction to `lime-model-extractors` 0.2.0.
+- Segmented self-suspension extraction now accepts `--suspension-max-segments` (default 1024 segments per job) and `--suspension-max-models` (default 16 distinct segment counts per job separator). If either limit is exceeded, LiME omits that separator's segmented model and reports how far to raise the limit.
+- Exact periodic arrival detection uses the first gap between absolute timer arrivals as the period and rejects the model if a later gap differs.
+- Dynamic self-suspension extraction now keeps a running maximum of the total suspension time observed in each job.
+- Removed unused extractor utilities and the `min-max-heap` dependency.
+
+### Fixed
+
+- Fixed a Linux 7.2 eBPF verifier rejection when loading the signal delivery probe.
+- Resolved unused dependency warnings on Cargo 1.100 by removing unused crates and declaring Linux-only dependencies under the Linux target.
+- Fixed the CI extraction benchmark report to read wall-clock statistics from hyperfine 2.x.
+
 ## [0.4.1] - 2026-06-18
 
 ### Fixed
