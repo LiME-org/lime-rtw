@@ -43,11 +43,11 @@ impl Sporadic {
         }
     }
 
-    pub fn delta_mins(&self) -> impl Iterator<Item = u64> {
+    pub fn delta_mins(&self) -> impl Iterator<Item = u64> + use<> {
         Self::trim_and_shift_sub(self.dmin_extractor.current_model()).into_iter()
     }
 
-    pub fn delta_maxs(&self) -> impl Iterator<Item = u64> {
+    pub fn delta_maxs(&self) -> impl Iterator<Item = u64> + use<> {
         Self::trim_and_shift_add(self.dmax_extractor.current_model()).into_iter()
     }
 

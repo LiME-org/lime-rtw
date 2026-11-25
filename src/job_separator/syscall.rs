@@ -35,10 +35,10 @@ impl BlockingSyscall {
             return prev_end;
         }
 
-        if let Some(a) = arrival {
-            if a >= &prev_end {
-                return *a;
-            }
+        if let Some(a) = arrival
+            && a >= &prev_end
+        {
+            return *a;
         }
 
         release
@@ -97,10 +97,10 @@ impl BlockingSyscall {
                     _ => {}
                 }
             }
-        } else if let Some(a) = arrival {
-            if *a > ret {
-                return *a;
-            }
+        } else if let Some(a) = arrival
+            && *a > ret
+        {
+            return *a;
         }
 
         ret
@@ -109,10 +109,10 @@ impl BlockingSyscall {
     fn get_prev_end(&self, matched_events: &[TraceEvent], arrival: &Option<u64>) -> u64 {
         let mut job_end = matched_events.first().unwrap().ts;
 
-        if let Some(a) = arrival {
-            if job_end > *a {
-                return job_end;
-            }
+        if let Some(a) = arrival
+            && job_end > *a
+        {
+            return job_end;
         }
 
         for event in matched_events.iter().skip(1) {
@@ -120,10 +120,10 @@ impl BlockingSyscall {
                 SchedSwitchedOut { .. } if event.is_suspension() => {
                     job_end = event.ts;
 
-                    if let Some(a) = arrival {
-                        if job_end > *a {
-                            job_end = *a;
-                        }
+                    if let Some(a) = arrival
+                        && job_end > *a
+                    {
+                        job_end = *a;
                     }
 
                     return job_end;
@@ -133,10 +133,10 @@ impl BlockingSyscall {
             }
         }
 
-        if let Some(a) = arrival {
-            if job_end < *a {
-                return *a;
-            }
+        if let Some(a) = arrival
+            && job_end < *a
+        {
+            return *a;
         }
 
         job_end
@@ -145,18 +145,18 @@ impl BlockingSyscall {
     fn is_back_to_back(&self, matched_events: &[TraceEvent], arrival: &Option<u64>) -> bool {
         let first = matched_events.first().unwrap().ts;
 
-        if let Some(a) = arrival {
-            if *a <= first {
-                return true;
-            }
+        if let Some(a) = arrival
+            && *a <= first
+        {
+            return true;
         }
 
         for e in matched_events.iter().skip(1) {
             if e.is_suspension() {
-                if let Some(a) = arrival {
-                    if e.ts >= *a {
-                        return true;
-                    }
+                if let Some(a) = arrival
+                    && e.ts >= *a
+                {
+                    return true;
                 }
 
                 return false;
@@ -245,7 +245,7 @@ impl Signature for BlockingSyscall {
 mod tests {
     use crate::{
         events::TraceEvent,
-        job_separator::{syscall::BlockingSyscall, Signature},
+        job_separator::{Signature, syscall::BlockingSyscall},
     };
 
     const MIGRATE_BEFORE_SLEEP: &str = r#"[

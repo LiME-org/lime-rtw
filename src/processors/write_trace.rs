@@ -1,4 +1,5 @@
 use crate::{
+    EventProcessor, EventSource,
     cli::CLI,
     context::LimeContext,
     events::TraceEvent,
@@ -6,7 +7,6 @@ use crate::{
     task::TaskId,
     trace::writer::{EventsFileFormat, TraceEventWriter},
     utils::Dispatcher,
-    EventProcessor, EventSource,
 };
 
 #[cfg(target_os = "linux")]
@@ -107,14 +107,14 @@ impl EventProcessor for TraceWriter {
         #[cfg(not(target_os = "linux"))]
         let is_bpf_tracer = false;
 
-        if is_bpf_tracer {
-            if let Err(e) = self.output_dir.write_system_info(
+        if is_bpf_tracer
+            && let Err(e) = self.output_dir.write_system_info(
                 "trace",
                 &ctx.command_args,
                 ctx.time_reference.as_ref().unwrap(),
-            ) {
-                eprintln!("Warning: Failed to write system info: {}", e);
-            }
+            )
+        {
+            eprintln!("Warning: Failed to write system info: {}", e);
         }
 
         Ok(())
@@ -134,7 +134,9 @@ impl EventProcessor for TraceWriter {
         eprintln!("Results saved in {}.", self.output_dir.path());
 
         if self.written_files.is_empty() {
-            eprintln!("WARNING: No trace files were generated. If you're trying to trace non-real-time processes,");
+            eprintln!(
+                "WARNING: No trace files were generated. If you're trying to trace non-real-time processes,"
+            );
             eprintln!(
                 "consider adding the --best-effort flag to trace best-effort (SCHED_OTHER) tasks."
             );

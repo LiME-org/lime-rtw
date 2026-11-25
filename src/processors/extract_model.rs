@@ -3,13 +3,13 @@
 use std::io::Write;
 
 use crate::{
+    EventProcessor, EventSource,
     context::LimeContext,
     events::{EventData, TraceEvent},
     io::LimeOutputDirectory,
-    model_extractors::{dd, ThreadTaskModelExtractor},
+    model_extractors::{ThreadTaskModelExtractor, dd},
     task::{TaskId, TaskInfos},
     utils::{Dispatcher, ThreadId},
-    EventProcessor, EventSource,
 };
 
 #[cfg(target_os = "linux")]
@@ -70,11 +70,11 @@ impl TaskModelExtractor {
         let mut info_file_created = false;
         let mut model_file_created = false;
 
-        if let Some(infos) = infos {
-            if let Ok(mut f_infos) = self.output_directory.create_infos_file(task_id) {
-                info_file_created = true;
-                _ = self.write_thread_infos(&mut f_infos, infos, ctx);
-            }
+        if let Some(infos) = infos
+            && let Ok(mut f_infos) = self.output_directory.create_infos_file(task_id)
+        {
+            info_file_created = true;
+            _ = self.write_thread_infos(&mut f_infos, infos, ctx);
         }
 
         if let Ok(mut f_models) = self.output_directory.create_models_file(task_id) {
@@ -103,14 +103,14 @@ impl EventProcessor for TaskModelExtractor {
         #[cfg(not(target_os = "linux"))]
         let is_bpf_tracer = false;
 
-        if is_bpf_tracer {
-            if let Err(e) = self.output_directory.write_system_info(
+        if is_bpf_tracer
+            && let Err(e) = self.output_directory.write_system_info(
                 "extract",
                 &ctx.command_args,
                 ctx.time_reference.as_ref().unwrap(),
-            ) {
-                eprintln!("Warning: Failed to write system info: {}", e);
-            }
+            )
+        {
+            eprintln!("Warning: Failed to write system info: {}", e);
         }
 
         Ok(())
@@ -168,18 +168,21 @@ impl EventProcessor for TaskModelExtractor {
 
             if let Ok((info_created, model_created)) =
                 self.report_task(&task_id, extractor, &infos, ctx)
+                && (info_created || model_created)
             {
-                if info_created || model_created {
-                    total_files += 1;
-                }
+                total_files += 1;
             }
         }
 
         eprintln!("Results saved in {}.", ctx.output_dir.path());
 
         if total_files == 0 {
-            eprintln!("WARNING: No model files were generated. If you're trying to analyze non-real-time processes,");
-            eprintln!("consider adding the --best-effort flag to include best-effort (SCHED_OTHER) tasks.");
+            eprintln!(
+                "WARNING: No model files were generated. If you're trying to analyze non-real-time processes,"
+            );
+            eprintln!(
+                "consider adding the --best-effort flag to include best-effort (SCHED_OTHER) tasks."
+            );
         }
 
         Ok(())

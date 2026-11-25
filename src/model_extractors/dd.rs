@@ -8,7 +8,7 @@ use serde::Serialize;
 
 use crate::job_separator::JobSeparator;
 
-use super::{arrival::ArrivalModel, rbf::Rbf, JobSeparatorExtractors, ThreadTaskModelExtractor};
+use super::{JobSeparatorExtractors, ThreadTaskModelExtractor, arrival::ArrivalModel, rbf::Rbf};
 
 /// Job-separator-specific extracted models.
 #[derive(Serialize)]

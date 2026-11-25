@@ -604,7 +604,7 @@ impl CLI {
 #[cfg(test)]
 mod tests {
     #[cfg(target_os = "linux")]
-    use crate::cli::{LimeSubCommand, TraceTarget, CLI};
+    use crate::cli::{CLI, LimeSubCommand, TraceTarget};
     #[cfg(target_os = "linux")]
     use clap::Parser;
 

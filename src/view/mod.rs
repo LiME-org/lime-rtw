@@ -4,18 +4,18 @@ use anyhow::Result;
 use crossterm::{
     event::{self, Event},
     execute,
-    terminal::{disable_raw_mode, enable_raw_mode, EnterAlternateScreen, LeaveAlternateScreen},
+    terminal::{EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode},
 };
 use tui::{
+    Terminal,
     backend::{Backend, CrosstermBackend},
     widgets::{Block, Borders},
-    Terminal,
 };
 
+use crate::EventProcessor;
 use crate::context::LimeContext;
 use crate::events::TraceEvent;
 use crate::task::TaskId;
-use crate::EventProcessor;
 
 mod data;
 mod process_list;
@@ -25,7 +25,7 @@ mod ui;
 pub use data::ViewData;
 pub use process_list::ProcessList;
 pub use stats::StatsView;
-pub use ui::{draw_ui, handle_input, AppState};
+pub use ui::{AppState, draw_ui, handle_input};
 
 // Main view processor that manages the TUI application lifecycle
 pub struct ViewProcessor {
@@ -70,37 +70,37 @@ impl ViewProcessor {
     {
         app.load_data()?;
 
-        if let Some(process_list) = &app.process_list {
-            if process_list.is_empty() {
-                terminal.draw(|f| {
-                    let size = f.area();
-                    let block = Block::default().title("No Tasks").borders(Borders::ALL);
-                    let text = ["No tasks found to display.", "", "Press Enter to exit..."];
-                    let paragraph = tui::widgets::Paragraph::new(text.join("\n"))
-                        .block(block)
-                        .alignment(tui::layout::Alignment::Center);
-                    f.render_widget(paragraph, size);
-                })?;
+        if let Some(process_list) = &app.process_list
+            && process_list.is_empty()
+        {
+            terminal.draw(|f| {
+                let size = f.area();
+                let block = Block::default().title("No Tasks").borders(Borders::ALL);
+                let text = ["No tasks found to display.", "", "Press Enter to exit..."];
+                let paragraph = tui::widgets::Paragraph::new(text.join("\n"))
+                    .block(block)
+                    .alignment(tui::layout::Alignment::Center);
+                f.render_widget(paragraph, size);
+            })?;
 
-                // Wait for Enter key
-                loop {
-                    if let Event::Key(key) = event::read()? {
-                        if key.code == crossterm::event::KeyCode::Enter {
-                            break;
-                        }
-                    }
+            // Wait for Enter key
+            loop {
+                if let Event::Key(key) = event::read()?
+                    && key.code == crossterm::event::KeyCode::Enter
+                {
+                    break;
                 }
-                return Ok(());
             }
+            return Ok(());
         }
 
         loop {
             terminal.draw(|f| draw_ui(f, &mut app))?;
 
-            if let Event::Key(key) = event::read()? {
-                if !handle_input(&mut app, key) {
-                    break;
-                }
+            if let Event::Key(key) = event::read()?
+                && !handle_input(&mut app, key)
+            {
+                break;
             }
         }
 

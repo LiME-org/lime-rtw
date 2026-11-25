@@ -45,17 +45,17 @@ impl ProcessInfoAssembler {
                 ProcessInfoAssemblerAction::Consumed
             }
             EventType::PROCESS_INFO_END => {
-                if let Some(state) = self.states.remove(&event.pid_tgid) {
-                    if let Some((id, ts, process_info)) = state.into() {
-                        let trace_event = TraceEvent {
-                            ts,
-                            id,
-                            ev: EventData::ProcessInfoUpdate {
-                                process_info: Some(process_info),
-                            },
-                        };
-                        return ProcessInfoAssemblerAction::Completed(trace_event);
-                    }
+                if let Some(state) = self.states.remove(&event.pid_tgid)
+                    && let Some((id, ts, process_info)) = state.into()
+                {
+                    let trace_event = TraceEvent {
+                        ts,
+                        id,
+                        ev: EventData::ProcessInfoUpdate {
+                            process_info: Some(process_info),
+                        },
+                    };
+                    return ProcessInfoAssemblerAction::Completed(trace_event);
                 }
 
                 ProcessInfoAssemblerAction::Consumed

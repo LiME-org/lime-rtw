@@ -37,7 +37,7 @@ impl JobTracker {
             let mut s = separation;
             let last_separation = self.last_separation.get_or_default(&separator);
 
-            if let Some(ref prev) = last_separation {
+            if let Some(prev) = last_separation.as_ref() {
                 if s.is_back_to_back() && s.curr_arrival.is_none() {
                     s.curr_release = prev.curr_release;
                 }

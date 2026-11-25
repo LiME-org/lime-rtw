@@ -17,13 +17,13 @@ use std::{num::NonZeroUsize, time::Duration};
 
 #[cfg(target_os = "linux")]
 use crate::cli::TraceTarget;
-use crate::cli::{EventSourceType, CLI};
+use crate::cli::{CLI, EventSourceType};
 use crate::io::LimeOutputDirectory;
 use crate::task::TimeReference;
 use crate::trace::writer::EventsFileFormat;
 
 #[cfg(target_os = "linux")]
-use nix::time::{clock_gettime, ClockId};
+use nix::time::{ClockId, clock_gettime};
 
 /// Contains all LiME paramaters
 pub struct LimeContext {

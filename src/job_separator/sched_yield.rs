@@ -79,7 +79,7 @@ mod tests {
     use crate::{
         events::TraceEvent,
         job_separator::{
-            sched_yield::SchedYieldDeadline, JobSeparator, Signature, SignatureMatcher,
+            JobSeparator, Signature, SignatureMatcher, sched_yield::SchedYieldDeadline,
         },
     };
 

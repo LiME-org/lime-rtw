@@ -7,6 +7,7 @@ use std::{
 };
 
 use crate::{
+    EventProcessor,
     context::LimeContext,
     events::{EventData, TraceEvent},
     io::LimeOutputDirectory,
@@ -15,7 +16,6 @@ use crate::{
     job_separator::JobSeparator,
     task::TaskId,
     utils::{Dispatcher, ThreadId},
-    EventProcessor,
 };
 use anyhow::Result;
 use serde::Serialize;
@@ -180,8 +180,12 @@ impl EventProcessor for JobExtractor {
         eprintln!("Results saved in {}.", self.output_dir.path());
 
         if self.job_files_written == 0 {
-            eprintln!("WARNING: No job files were generated. If you're trying to analyze non-real-time processes,");
-            eprintln!("consider adding the --best-effort flag to include best-effort (SCHED_OTHER) tasks.");
+            eprintln!(
+                "WARNING: No job files were generated. If you're trying to analyze non-real-time processes,"
+            );
+            eprintln!(
+                "consider adding the --best-effort flag to include best-effort (SCHED_OTHER) tasks."
+            );
         }
 
         Ok(())

@@ -91,7 +91,7 @@ impl Signature for SelfSuspension {
 mod tests {
     use crate::{
         events::TraceEvent,
-        job_separator::{suspension::SelfSuspension, Signature},
+        job_separator::{Signature, suspension::SelfSuspension},
     };
 
     const SELF_SUSPENDING: &str = r#"

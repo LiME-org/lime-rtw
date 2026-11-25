@@ -1,14 +1,14 @@
 use anyhow::Result;
 use crossterm::event::{Event, KeyCode, KeyEvent};
 use tui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, Clear, Paragraph},
-    Frame,
 };
 
-use tui_input::{backend::crossterm::EventHandler, Input};
+use tui_input::{Input, backend::crossterm::EventHandler};
 
 use crate::task::TaskId;
 
@@ -102,10 +102,10 @@ impl AppState {
     }
 
     pub fn process_list_handle_enter(&mut self) {
-        if let Some(process_list) = &mut self.process_list {
-            if process_list.handle_enter().is_some() {
-                self.focused_panel = FocusPanel::ModelView;
-            }
+        if let Some(process_list) = &mut self.process_list
+            && process_list.handle_enter().is_some()
+        {
+            self.focused_panel = FocusPanel::ModelView;
         }
     }
 
@@ -149,21 +149,20 @@ pub fn draw_ui(f: &mut Frame, app: &mut AppState) {
     let size = f.area();
 
     if app.focused_panel == FocusPanel::DetailView {
-        if let Some(task_id) = app.get_selected_process() {
-            if let Some(process_list) = &app.process_list {
-                if let Some(process) = process_list.get_process_info(&task_id) {
-                    let chunks = Layout::default()
-                        .direction(Direction::Vertical)
-                        .margin(1)
-                        .constraints([Constraint::Min(0), Constraint::Length(3)].as_ref())
-                        .split(size);
+        if let Some(task_id) = app.get_selected_process()
+            && let Some(process_list) = &app.process_list
+            && let Some(process) = process_list.get_process_info(&task_id)
+        {
+            let chunks = Layout::default()
+                .direction(Direction::Vertical)
+                .margin(1)
+                .constraints([Constraint::Min(0), Constraint::Length(3)].as_ref())
+                .split(size);
 
-                    app.stats_view.draw_detail_fullscreen(f, chunks[0], process);
+            app.stats_view.draw_detail_fullscreen(f, chunks[0], process);
 
-                    draw_help_text_detail_mode(f, chunks[1]);
-                    return;
-                }
-            }
+            draw_help_text_detail_mode(f, chunks[1]);
+            return;
         }
 
         app.focused_panel = FocusPanel::ModelView;

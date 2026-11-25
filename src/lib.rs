@@ -57,7 +57,7 @@ use crate::{
 pub trait EventSource: Sized {
     /// Consume and feed all events to the supplied processor.
     fn event_loop<P: EventProcessor>(&mut self, processor: &mut P, ctx: &LimeContext)
-        -> Result<()>;
+    -> Result<()>;
 
     /// Process the events with the supplied `EventProcessor`.
     fn process_events<P: EventProcessor>(

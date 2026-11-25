@@ -7,7 +7,7 @@ use crate::{
     utils::ThreadId,
 };
 
-use super::{types, RawClockId, SiCode};
+use super::{RawClockId, SiCode, types};
 
 // Work around bindgen output that flips between i32 and u32 across platforms.
 fn si_code_as_i32(code: SiCode) -> i32 {
@@ -164,11 +164,7 @@ impl From<&RawEvent> for EventData {
                 pfds: unsafe { event.evd.enter_poll.pfds },
                 timeout_nsec: unsafe {
                     let t = event.evd.enter_poll.timeout_msecs as i64;
-                    if t < 0 {
-                        t
-                    } else {
-                        t * 1_000_000
-                    }
+                    if t < 0 { t } else { t * 1_000_000 }
                 },
             },
 

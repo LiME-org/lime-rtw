@@ -1,5 +1,5 @@
 use lime_model_extractors::{
-    extractors::PeriodicExtractor as CratePeriodicExtractor, PeriodicConfig,
+    PeriodicConfig, extractors::PeriodicExtractor as CratePeriodicExtractor,
 };
 
 use crate::job::Job;

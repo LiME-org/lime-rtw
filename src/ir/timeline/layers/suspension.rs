@@ -3,7 +3,7 @@ use crate::{events::TraceEvent, interval::Interval};
 
 use crate::events::EventData::*;
 
-use super::{base::BaseLayer, Layer};
+use super::{Layer, base::BaseLayer};
 
 pub struct SuspensionLayer {
     base: BaseLayer,
@@ -57,8 +57,8 @@ mod tests {
     use crate::events::EventData::*;
     use crate::events::TraceEvent;
     use crate::interval::TimeInterval;
-    use crate::ir::timeline::layers::suspension::SuspensionLayer;
     use crate::ir::timeline::layers::Layer;
+    use crate::ir::timeline::layers::suspension::SuspensionLayer;
     use crate::utils::ThreadId;
 
     const ID: ThreadId = ThreadId { pid: 0, tgid: 0 };

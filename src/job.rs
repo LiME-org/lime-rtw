@@ -2,7 +2,7 @@
 
 use crate::{
     interval::TimeInterval,
-    ir::timeline::{layers::Layer, Timeline},
+    ir::timeline::{Timeline, layers::Layer},
 };
 use serde::{Deserialize, Serialize};
 

@@ -766,13 +766,13 @@ impl IntervalSeq<u64> {
             .drain(..idx)
             .fold(0, |acc, i| acc + i.duration_unwrap());
 
-        if let Some(first) = self.buff.front_mut() {
-            if first.contains(&until) {
-                upper = Value(until);
-                cov += until.saturating_sub(first.lower_bound().value().unwrap());
+        if let Some(first) = self.buff.front_mut()
+            && first.contains(&until)
+        {
+            upper = Value(until);
+            cov += until.saturating_sub(first.lower_bound().value().unwrap());
 
-                first.set_lower_bound(until);
-            }
+            first.set_lower_bound(until);
         }
 
         let compressed_interval = Interval::new(lower, upper);
@@ -784,7 +784,7 @@ impl IntervalSeq<u64> {
 mod tests {
     use crate::interval::do_search_upper_bound;
 
-    use super::{do_search_lower_bound, Interval, IntervalSeq};
+    use super::{Interval, IntervalSeq, do_search_lower_bound};
 
     use super::Bound;
 

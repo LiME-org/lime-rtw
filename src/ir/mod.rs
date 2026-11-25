@@ -2,7 +2,7 @@
 
 use self::{
     job::JobTracker,
-    timeline::{layers::Layer, Timeline},
+    timeline::{Timeline, layers::Layer},
 };
 use crate::{events::TraceEvent, interval::TimeInterval, job::Job, job_separator::JobSeparator};
 

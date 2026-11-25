@@ -1,9 +1,8 @@
 use anyhow::{Error, Result};
 use clap::Parser;
 use lime_rtw::{
-    context::LimeContext, processors::extract_job::JobExtractor,
-    processors::extract_model::TaskModelExtractor, trace::reader::TraceReader, EventProcessor,
-    EventSource,
+    EventProcessor, EventSource, context::LimeContext, processors::extract_job::JobExtractor,
+    processors::extract_model::TaskModelExtractor, trace::reader::TraceReader,
 };
 
 #[cfg(feature = "tui")]

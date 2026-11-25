@@ -156,11 +156,11 @@ impl DemandWindow {
     }
 
     fn do_update(&mut self, event: &TraceEvent) -> bool {
-        if let Some(raw_demand) = self.demand_tracker.update(event) {
-            if let Some(agg_demand) = self.aggregator.push(raw_demand) {
-                self.push_aggregated_demand(agg_demand);
-                return true;
-            }
+        if let Some(raw_demand) = self.demand_tracker.update(event)
+            && let Some(agg_demand) = self.aggregator.push(raw_demand)
+        {
+            self.push_aggregated_demand(agg_demand);
+            return true;
         }
 
         false

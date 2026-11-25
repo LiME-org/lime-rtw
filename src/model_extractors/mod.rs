@@ -3,7 +3,7 @@ use self::event_rate::EventRate;
 use self::rbf::RbfExtractor;
 use self::suspension::BagOfSegmentedSelfSuspension;
 use self::{
-    arrival::{sporadic::Sporadic, ArrivalModel, ArrivalModelExtractor},
+    arrival::{ArrivalModel, ArrivalModelExtractor, sporadic::Sporadic},
     execution::ExecutionTime,
     job_count::JobCounter,
     suspension::DynamicSelfSuspension,

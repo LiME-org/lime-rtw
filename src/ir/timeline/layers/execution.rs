@@ -3,7 +3,7 @@ use crate::{
     interval::{Interval, TimeInterval},
 };
 
-use super::{base::BaseLayer, Layer};
+use super::{Layer, base::BaseLayer};
 
 pub struct ExecutionLayer {
     recorder: BaseLayer,
@@ -59,8 +59,8 @@ mod tests {
     use crate::events::EventData::*;
     use crate::events::TraceEvent;
     use crate::interval::TimeInterval;
-    use crate::ir::timeline::layers::execution::ExecutionLayer;
     use crate::ir::timeline::layers::Layer;
+    use crate::ir::timeline::layers::execution::ExecutionLayer;
     use crate::utils::ThreadId;
 
     const ID: ThreadId = ThreadId { pid: 0, tgid: 0 };

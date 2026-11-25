@@ -1,7 +1,7 @@
 use std::{collections::BTreeMap, num::NonZeroUsize};
 
 use lime_model_extractors::{
-    extractors::SegmentedSuspensionModelExtractor, ObservedSegment, SuspensionError,
+    ObservedSegment, SuspensionError, extractors::SegmentedSuspensionModelExtractor,
 };
 
 use crate::{ir::timeline::Timeline, job::Job};

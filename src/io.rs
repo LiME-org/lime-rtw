@@ -12,9 +12,9 @@ use std::{
     path::{Path, PathBuf},
 };
 
-use anyhow::{bail, Ok, Result};
+use anyhow::{Ok, Result, bail};
 use glob::Paths;
-use time::{macros::format_description, OffsetDateTime};
+use time::{OffsetDateTime, macros::format_description};
 
 use crate::trace::writer::EventsFileFormat;
 use crate::{
@@ -145,12 +145,11 @@ impl Iterator for TaskIds {
                 continue;
             }
 
-            if let Some(fname) = p.unwrap().file_name().and_then(|p| p.to_str()) {
-                if let Result::Ok(task_id) = TaskId::try_from_filename(fname) {
-                    if self.found.insert(task_id) {
-                        return Some(task_id);
-                    }
-                }
+            if let Some(fname) = p.unwrap().file_name().and_then(|p| p.to_str())
+                && let Result::Ok(task_id) = TaskId::try_from_filename(fname)
+                && self.found.insert(task_id)
+            {
+                return Some(task_id);
             }
         }
 

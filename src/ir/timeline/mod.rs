@@ -3,7 +3,7 @@ use crate::{
     interval::{Interval, TimeInterval},
 };
 
-use self::{layers::execution::ExecutionLayer, layers::suspension::SuspensionLayer, layers::Layer};
+use self::{layers::Layer, layers::execution::ExecutionLayer, layers::suspension::SuspensionLayer};
 
 use super::job::JobTracker;
 
@@ -88,18 +88,18 @@ impl Timeline {
     fn trim(&mut self, job_tracker: &JobTracker) {
         let trimming_point = self.trimming_point(job_tracker);
 
-        if let Some(c) = self.compression_point {
-            if trimming_point <= c {
-                let t_p = self.plain_trimming_point(self.compression_point, job_tracker);
+        if let Some(c) = self.compression_point
+            && trimming_point <= c
+        {
+            let t_p = self.plain_trimming_point(self.compression_point, job_tracker);
 
-                match t_p {
-                    Some(p) => self.do_compress(p, false),
-                    None => self.do_compress_all(false),
-                }
+            match t_p {
+                Some(p) => self.do_compress(p, false),
+                None => self.do_compress_all(false),
+            }
 
-                if trimming_point < c {
-                    self.compression_point = Some(trimming_point)
-                }
+            if trimming_point < c {
+                self.compression_point = Some(trimming_point)
             }
         }
 

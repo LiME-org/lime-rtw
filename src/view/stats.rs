@@ -1,11 +1,11 @@
 use serde_json::Value;
 use std::collections::HashMap;
 use tui::{
+    Frame,
     layout::{Constraint, Direction, Layout, Rect},
     style::{Color, Modifier, Style},
     text::{Line, Span},
     widgets::{Block, Borders, List, ListItem, ListState, Paragraph, Wrap},
-    Frame,
 };
 
 use super::data::ProcessInfo;
@@ -123,23 +123,23 @@ impl StatsView {
 
             f.render_widget(model_block, area);
 
-            if let Some(idx) = self.selected_separator_idx {
-                if idx < separator_names.len() {
-                    let separator_name = &separator_names[idx];
-                    let model_info = &separator_data[separator_name];
+            if let Some(idx) = self.selected_separator_idx
+                && idx < separator_names.len()
+            {
+                let separator_name = &separator_names[idx];
+                let model_info = &separator_data[separator_name];
 
-                    let model_text = self.format_model_info(separator_name, model_info);
+                let model_text = self.format_model_info(separator_name, model_info);
 
-                    let details_block = Block::default()
-                        .title(format!("Details for '{separator_name}'"))
-                        .borders(Borders::NONE);
+                let details_block = Block::default()
+                    .title(format!("Details for '{separator_name}'"))
+                    .borders(Borders::NONE);
 
-                    let details = Paragraph::new(model_text)
-                        .block(details_block)
-                        .wrap(Wrap { trim: false });
+                let details = Paragraph::new(model_text)
+                    .block(details_block)
+                    .wrap(Wrap { trim: false });
 
-                    f.render_widget(details, chunks[1]);
-                }
+                f.render_widget(details, chunks[1]);
             }
         } else {
             let title_block =
@@ -167,11 +167,11 @@ impl StatsView {
             return;
         }
 
-        if let Some(idx) = self.selected_separator_idx {
-            if idx >= separator_names.len() {
-                self.selected_separator_idx = Some(0);
-                self.separator_state.select(Some(0));
-            }
+        if let Some(idx) = self.selected_separator_idx
+            && idx >= separator_names.len()
+        {
+            self.selected_separator_idx = Some(0);
+            self.separator_state.select(Some(0));
         }
     }
 
@@ -393,17 +393,16 @@ impl StatsView {
                                 .unwrap_or("unnamed");
 
                             let mut sep_details = String::new();
-                            if let Some(obj) = separator_obj.as_object() {
-                                if let Some(clock_id) = obj.get("clock_id").and_then(|c| c.as_str())
-                                {
-                                    let abs_str = if obj.get("abs_time").is_some() {
-                                        ", absolute"
-                                    } else {
-                                        ""
-                                    };
+                            if let Some(obj) = separator_obj.as_object()
+                                && let Some(clock_id) = obj.get("clock_id").and_then(|c| c.as_str())
+                            {
+                                let abs_str = if obj.get("abs_time").is_some() {
+                                    ", absolute"
+                                } else {
+                                    ""
+                                };
 
-                                    sep_details = format!("({clock_id}{abs_str})");
-                                }
+                                sep_details = format!("({clock_id}{abs_str})");
                             }
 
                             let separator_name = if sep_details.is_empty() {
@@ -421,17 +420,17 @@ impl StatsView {
                                 model_info.count = Some(count);
                             }
 
-                            if let Some(arrival_models) = sep.get("arrival_models") {
-                                if let Some(models_array) = arrival_models.as_array() {
-                                    for model in models_array {
-                                        if let Some("periodic") =
-                                            model.get("model").and_then(|t| t.as_str())
-                                        {
-                                            model_info.period =
-                                                model.get("period").and_then(|p| p.as_u64());
-                                            model_info.jitter =
-                                                model.get("max_jitter").and_then(|j| j.as_u64());
-                                        }
+                            if let Some(arrival_models) = sep.get("arrival_models")
+                                && let Some(models_array) = arrival_models.as_array()
+                            {
+                                for model in models_array {
+                                    if let Some("periodic") =
+                                        model.get("model").and_then(|t| t.as_str())
+                                    {
+                                        model_info.period =
+                                            model.get("period").and_then(|p| p.as_u64());
+                                        model_info.jitter =
+                                            model.get("max_jitter").and_then(|j| j.as_u64());
                                     }
                                 }
                             }
@@ -503,46 +502,45 @@ impl StatsView {
         }
 
         if model_value.is_object() {
-            if let Some(separators) = model_value.get("by_job_separator") {
-                if let Some(seps_array) = separators.as_array() {
-                    for sep in seps_array {
-                        if let Some(separator_obj) = sep.get("separator") {
-                            let sep_type = separator_obj
-                                .get("type")
-                                .and_then(|t| t.as_str())
-                                .unwrap_or("");
+            if let Some(separators) = model_value.get("by_job_separator")
+                && let Some(seps_array) = separators.as_array()
+            {
+                for sep in seps_array {
+                    if let Some(separator_obj) = sep.get("separator") {
+                        let sep_type = separator_obj
+                            .get("type")
+                            .and_then(|t| t.as_str())
+                            .unwrap_or("");
 
-                            if sep_type.is_empty() {
-                                continue;
-                            }
+                        if sep_type.is_empty() {
+                            continue;
+                        }
 
-                            let mut sep_details = String::new();
-                            if let Some(obj) = separator_obj.as_object() {
-                                if let Some(clock_id) = obj.get("clock_id").and_then(|c| c.as_str())
-                                {
-                                    let abs_str = if obj.get("abs_time").is_some() {
-                                        ", absolute"
-                                    } else {
-                                        ""
-                                    };
-
-                                    sep_details = format!("({clock_id}{abs_str})");
-                                }
-                            }
-
-                            let name = if sep_details.is_empty() {
-                                sep_type.to_string()
+                        let mut sep_details = String::new();
+                        if let Some(obj) = separator_obj.as_object()
+                            && let Some(clock_id) = obj.get("clock_id").and_then(|c| c.as_str())
+                        {
+                            let abs_str = if obj.get("abs_time").is_some() {
+                                ", absolute"
                             } else {
-                                format!("{sep_type} {sep_details}")
+                                ""
                             };
 
-                            if name == separator_name {
-                                return sep
-                                    .get("count")
-                                    .and_then(|c| c.as_u64())
-                                    .map(|c| c as usize)
-                                    .unwrap_or(1);
-                            }
+                            sep_details = format!("({clock_id}{abs_str})");
+                        }
+
+                        let name = if sep_details.is_empty() {
+                            sep_type.to_string()
+                        } else {
+                            format!("{sep_type} {sep_details}")
+                        };
+
+                        if name == separator_name {
+                            return sep
+                                .get("count")
+                                .and_then(|c| c.as_u64())
+                                .map(|c| c as usize)
+                                .unwrap_or(1);
                         }
                     }
                 }
@@ -559,10 +557,10 @@ impl StatsView {
                     .or_else(|| item.get("name").and_then(|n| n.as_str()))
                     .or_else(|| item.get("id").and_then(|i| i.as_str()));
 
-                if let Some(n) = name {
-                    if n == separator_name {
-                        count += 1;
-                    }
+                if let Some(n) = name
+                    && n == separator_name
+                {
+                    count += 1;
                 }
             }
         }
@@ -703,36 +701,36 @@ impl StatsView {
                 .map(|(name, _)| name.clone())
                 .collect();
 
-            if let Some(idx) = self.selected_separator_idx {
-                if idx < separator_names.len() {
-                    let separator_name = &separator_names[idx];
-                    let model_info = &separator_data[separator_name];
+            if let Some(idx) = self.selected_separator_idx
+                && idx < separator_names.len()
+            {
+                let separator_name = &separator_names[idx];
+                let model_info = &separator_data[separator_name];
 
-                    let block = Block::default()
-                        .title(format!("Detailed View: {separator_name} (Scroll: Up/Down)"))
-                        .borders(Borders::ALL);
+                let block = Block::default()
+                    .title(format!("Detailed View: {separator_name} (Scroll: Up/Down)"))
+                    .borders(Borders::ALL);
 
-                    let inner_area = block.inner(area);
-                    f.render_widget(block, area);
+                let inner_area = block.inner(area);
+                f.render_widget(block, area);
 
-                    let chunks = Layout::default()
-                        .direction(Direction::Vertical)
-                        .margin(1)
-                        .constraints(
-                            [
-                                Constraint::Length(3),
-                                Constraint::Length(1),
-                                Constraint::Min(10),
-                            ]
-                            .as_ref(),
-                        )
-                        .split(inner_area);
+                let chunks = Layout::default()
+                    .direction(Direction::Vertical)
+                    .margin(1)
+                    .constraints(
+                        [
+                            Constraint::Length(3),
+                            Constraint::Length(1),
+                            Constraint::Min(10),
+                        ]
+                        .as_ref(),
+                    )
+                    .split(inner_area);
 
-                    self.render_separator_summary(f, chunks[0], separator_name, model_info);
-                    self.render_separator_details(f, chunks[2], model_info);
+                self.render_separator_summary(f, chunks[0], separator_name, model_info);
+                self.render_separator_details(f, chunks[2], model_info);
 
-                    return;
-                }
+                return;
             }
 
             let block = Block::default()
@@ -819,88 +817,88 @@ impl StatsView {
             let mut has_models = false;
 
             for model in arrival_models {
-                if let Some(model_type) = model.get("model").and_then(|t| t.as_str()) {
-                    if model_type == "periodic" || model_type == "sporadic" {
-                        if !has_models {
-                            detail_lines.push(Line::from(vec![Span::styled(
-                                "Available Models:",
-                                Style::default()
-                                    .fg(Color::Yellow)
-                                    .add_modifier(Modifier::BOLD),
-                            )]));
-                            has_models = true;
-                        }
-
+                if let Some(model_type) = model.get("model").and_then(|t| t.as_str())
+                    && (model_type == "periodic" || model_type == "sporadic")
+                {
+                    if !has_models {
                         detail_lines.push(Line::from(vec![Span::styled(
-                            format!("► {model_type}"),
+                            "Available Models:",
                             Style::default()
-                                .fg(Color::Green)
+                                .fg(Color::Yellow)
                                 .add_modifier(Modifier::BOLD),
                         )]));
-
-                        match model_type {
-                            "periodic" => {
-                                let period = model.get("period").and_then(|p| p.as_u64());
-
-                                if let Some(p) = period {
-                                    detail_lines.push(Line::from(vec![
-                                        Span::raw("  "),
-                                        Span::styled("Period:", Style::default().fg(Color::Blue)),
-                                        Span::raw(" "),
-                                        Span::styled(format!("{p} ns"), Style::default()),
-                                    ]));
-                                }
-
-                                let jitter = model
-                                    .get("max_jitter")
-                                    .or_else(|| model.get("jitter"))
-                                    .and_then(|j| j.as_u64());
-
-                                if let Some(j) = jitter {
-                                    detail_lines.push(Line::from(vec![
-                                        Span::raw("  "),
-                                        Span::styled("Jitter:", Style::default().fg(Color::Blue)),
-                                        Span::raw(" "),
-                                        Span::styled(format!("{j} ns"), Style::default()),
-                                    ]));
-                                }
-
-                                if let Some(offset) = model.get("offset").and_then(|o| o.as_u64()) {
-                                    detail_lines.push(Line::from(vec![
-                                        Span::raw("  "),
-                                        Span::styled("Offset:", Style::default().fg(Color::Blue)),
-                                        Span::raw(" "),
-                                        Span::styled(format!("{offset} ns"), Style::default()),
-                                    ]));
-                                }
-
-                                if let Some(on) = model.get("on").and_then(|o| o.as_str()) {
-                                    detail_lines.push(Line::from(vec![
-                                        Span::raw("  "),
-                                        Span::styled("On:", Style::default().fg(Color::Blue)),
-                                        Span::raw(" "),
-                                        Span::styled(on.to_string(), Style::default()),
-                                    ]));
-                                }
-                            }
-                            "sporadic" => {
-                                if let Some(mit) = model.get("mit").and_then(|m| m.as_u64()) {
-                                    detail_lines.push(Line::from(vec![
-                                        Span::raw("  "),
-                                        Span::styled(
-                                            "Minimum Inter-Arrival Time:",
-                                            Style::default().fg(Color::Blue),
-                                        ),
-                                        Span::raw(" "),
-                                        Span::styled(format!("{mit} ns"), Style::default()),
-                                    ]));
-                                }
-                            }
-                            _ => {}
-                        }
-
-                        detail_lines.push(Line::from(""));
+                        has_models = true;
                     }
+
+                    detail_lines.push(Line::from(vec![Span::styled(
+                        format!("► {model_type}"),
+                        Style::default()
+                            .fg(Color::Green)
+                            .add_modifier(Modifier::BOLD),
+                    )]));
+
+                    match model_type {
+                        "periodic" => {
+                            let period = model.get("period").and_then(|p| p.as_u64());
+
+                            if let Some(p) = period {
+                                detail_lines.push(Line::from(vec![
+                                    Span::raw("  "),
+                                    Span::styled("Period:", Style::default().fg(Color::Blue)),
+                                    Span::raw(" "),
+                                    Span::styled(format!("{p} ns"), Style::default()),
+                                ]));
+                            }
+
+                            let jitter = model
+                                .get("max_jitter")
+                                .or_else(|| model.get("jitter"))
+                                .and_then(|j| j.as_u64());
+
+                            if let Some(j) = jitter {
+                                detail_lines.push(Line::from(vec![
+                                    Span::raw("  "),
+                                    Span::styled("Jitter:", Style::default().fg(Color::Blue)),
+                                    Span::raw(" "),
+                                    Span::styled(format!("{j} ns"), Style::default()),
+                                ]));
+                            }
+
+                            if let Some(offset) = model.get("offset").and_then(|o| o.as_u64()) {
+                                detail_lines.push(Line::from(vec![
+                                    Span::raw("  "),
+                                    Span::styled("Offset:", Style::default().fg(Color::Blue)),
+                                    Span::raw(" "),
+                                    Span::styled(format!("{offset} ns"), Style::default()),
+                                ]));
+                            }
+
+                            if let Some(on) = model.get("on").and_then(|o| o.as_str()) {
+                                detail_lines.push(Line::from(vec![
+                                    Span::raw("  "),
+                                    Span::styled("On:", Style::default().fg(Color::Blue)),
+                                    Span::raw(" "),
+                                    Span::styled(on.to_string(), Style::default()),
+                                ]));
+                            }
+                        }
+                        "sporadic" => {
+                            if let Some(mit) = model.get("mit").and_then(|m| m.as_u64()) {
+                                detail_lines.push(Line::from(vec![
+                                    Span::raw("  "),
+                                    Span::styled(
+                                        "Minimum Inter-Arrival Time:",
+                                        Style::default().fg(Color::Blue),
+                                    ),
+                                    Span::raw(" "),
+                                    Span::styled(format!("{mit} ns"), Style::default()),
+                                ]));
+                            }
+                        }
+                        _ => {}
+                    }
+
+                    detail_lines.push(Line::from(""));
                 }
             }
 
@@ -1093,23 +1091,23 @@ impl StatsView {
             return;
         }
 
-        if let Some(models) = model_data.get("arrival_models") {
-            if let Some(models_array) = models.as_array() {
-                for model in models_array {
-                    if let Some(wcets) = model.get("WCET_n").and_then(|w| w.as_array()) {
-                        let model_type = model
-                            .get("model")
-                            .and_then(|m| m.as_str())
-                            .unwrap_or("unknown");
+        if let Some(models) = model_data.get("arrival_models")
+            && let Some(models_array) = models.as_array()
+        {
+            for model in models_array {
+                if let Some(wcets) = model.get("WCET_n").and_then(|w| w.as_array()) {
+                    let model_type = model
+                        .get("model")
+                        .and_then(|m| m.as_str())
+                        .unwrap_or("unknown");
 
-                        self.add_wcet_table_header(
-                            wcet_table_lines,
-                            width,
-                            &format!("WCET_n Table ({model_type})"),
-                        );
-                        self.add_wcet_table_content(wcet_table_lines, wcets, width);
-                        break;
-                    }
+                    self.add_wcet_table_header(
+                        wcet_table_lines,
+                        width,
+                        &format!("WCET_n Table ({model_type})"),
+                    );
+                    self.add_wcet_table_content(wcet_table_lines, wcets, width);
+                    break;
                 }
             }
         }
@@ -1167,39 +1165,39 @@ impl StatsView {
         arrival_curve_table_lines: &mut Vec<Line<'_>>,
         width: u16,
     ) {
-        if let Some(models) = model_data.get("arrival_models") {
-            if let Some(models_array) = models.as_array() {
-                for model in models_array {
-                    let model_type = model
-                        .get("model")
-                        .and_then(|m| m.as_str())
-                        .unwrap_or("unknown");
+        if let Some(models) = model_data.get("arrival_models")
+            && let Some(models_array) = models.as_array()
+        {
+            for model in models_array {
+                let model_type = model
+                    .get("model")
+                    .and_then(|m| m.as_str())
+                    .unwrap_or("unknown");
 
-                    if model_type == "arrival_curve" {
-                        let dmins: Vec<u64> = model
-                            .get("dmins")
-                            .and_then(|dm| dm.as_array())
-                            .map_or(Vec::new(), |arr| {
-                                arr.iter().filter_map(|v| v.as_u64()).collect()
-                            });
+                if model_type == "arrival_curve" {
+                    let dmins: Vec<u64> = model
+                        .get("dmins")
+                        .and_then(|dm| dm.as_array())
+                        .map_or(Vec::new(), |arr| {
+                            arr.iter().filter_map(|v| v.as_u64()).collect()
+                        });
 
-                        let dmaxs: Vec<u64> = model
-                            .get("dmaxs")
-                            .and_then(|dm| dm.as_array())
-                            .map_or(Vec::new(), |arr| {
-                                arr.iter().filter_map(|v| v.as_u64()).collect()
-                            });
+                    let dmaxs: Vec<u64> = model
+                        .get("dmaxs")
+                        .and_then(|dm| dm.as_array())
+                        .map_or(Vec::new(), |arr| {
+                            arr.iter().filter_map(|v| v.as_u64()).collect()
+                        });
 
-                        if !dmins.is_empty() && !dmaxs.is_empty() {
-                            self.add_arrival_curve_table_content(
-                                arrival_curve_table_lines,
-                                &dmins,
-                                &dmaxs,
-                                width,
-                            );
-                        }
-                        break;
+                    if !dmins.is_empty() && !dmaxs.is_empty() {
+                        self.add_arrival_curve_table_content(
+                            arrival_curve_table_lines,
+                            &dmins,
+                            &dmaxs,
+                            width,
+                        );
                     }
+                    break;
                 }
             }
         }

@@ -3,7 +3,7 @@
 //!
 
 use crate::context::LimeContext;
-use crate::task::{mapper::TaskMapper, TaskId, TaskInfos};
+use crate::task::{TaskId, TaskInfos, mapper::TaskMapper};
 use crate::utils::any_as_u8_slice_mut;
 use crate::{EventProcessor, EventSource};
 use anyhow::{Error, Result};
@@ -29,10 +29,10 @@ use std::time::Duration;
 
 use std::sync::atomic::Ordering;
 use std::sync::mpsc::{Receiver, SyncSender};
-use std::sync::{mpsc, Arc, Barrier, Mutex};
+use std::sync::{Arc, Barrier, Mutex, mpsc};
 
-use nix::sys::wait::{waitpid, WaitStatus};
-use nix::unistd::{fork, Pid};
+use nix::sys::wait::{WaitStatus, waitpid};
+use nix::unistd::{Pid, fork};
 use nix::{
     sys::signal::{
         SigSet,

@@ -90,5 +90,5 @@ impl From<u64> for ThreadId {
 /// Under the hood this function uses `std::slice::from_raw_parts_mut`.
 /// The same precautions must be taken; refer to the standard documentation.
 pub unsafe fn any_as_u8_slice_mut<T: Sized>(p: &mut T) -> &mut [u8] {
-    std::slice::from_raw_parts_mut((p as *mut T) as *mut u8, std::mem::size_of::<T>())
+    unsafe { std::slice::from_raw_parts_mut((p as *mut T) as *mut u8, std::mem::size_of::<T>()) }
 }

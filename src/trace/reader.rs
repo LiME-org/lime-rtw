@@ -9,15 +9,15 @@ use std::{
 };
 
 use crate::{
+    EventProcessor, EventSource,
     context::LimeContext,
     events::TraceEvent,
     io::LimeOutputDirectory,
     task::{TaskId, TaskInfos},
     trace::writer::EventsFileFormat,
-    EventProcessor, EventSource,
 };
 
-use anyhow::{bail, Result};
+use anyhow::{Result, bail};
 
 #[cfg(feature = "proto")]
 use {
@@ -172,10 +172,10 @@ impl TraceReader {
             .task_ids()
             .map_err(|e| anyhow::anyhow!("Failed to get task IDs: {}", e))?;
         for task_id in task_ids {
-            if let Ok(file) = self.output_dir.open_infos_file(&task_id) {
-                if let Ok(infos) = serde_json::from_reader(BufReader::new(file)) {
-                    self.task_infos.insert(task_id, infos);
-                }
+            if let Ok(file) = self.output_dir.open_infos_file(&task_id)
+                && let Ok(infos) = serde_json::from_reader(BufReader::new(file))
+            {
+                self.task_infos.insert(task_id, infos);
             }
         }
         Ok(())
